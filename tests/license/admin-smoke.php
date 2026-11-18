@@ -2,7 +2,7 @@
 $SRC = $argv[1];
 require __DIR__ . '/wp-stubs.php';
 require __DIR__ . '/vendor-stubs.php';
-foreach ( [ 'esc_html', 'esc_attr', 'esc_textarea', 'esc_url', 'esc_js' ] as $f ) eval( "function $f(\$s){ return htmlspecialchars((string)\$s, ENT_QUOTES); }" );
+foreach ( [ 'esc_html', 'esc_attr', 'esc_textarea', 'esc_url', 'esc_js' ] as $f ) if ( ! function_exists( $f ) ) eval( "function $f(\$s){ return htmlspecialchars((string)\$s, ENT_QUOTES); }" );
 function current_user_can( $c ) { return true; } function wp_nonce_field( $a ) { echo "<nonce $a>"; } function submit_button( $t = '', $c = '' ) { echo "<button>$t</button>"; }
 function checked( $a, $b, $e = true ) { return $a == $b ? 'checked' : ''; } function human_time_diff( $t ) { return '1 hour'; } function wp_unslash( $s ) { return $s; }
 function wp_create_nonce( $a ) { return 'n'; } function nocache_headers() {} function wp_next_scheduled_x() {} function selected( $a, $b, $e = true ) { return $a == $b ? ' selected' : ''; } function get_current_user_id() { return 1; } function get_user_meta() { return ''; } function nl2br_( $s ) { return $s; }

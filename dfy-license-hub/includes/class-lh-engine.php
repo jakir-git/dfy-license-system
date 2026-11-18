@@ -253,17 +253,20 @@ class DFY_LH_Engine {
         $left  = $site['expires_at'] ? max( 0, (int) ceil( ( strtotime( $site['expires_at'] . ' UTC' ) - time() ) / self::DAY ) ) : 0;
         $slugs = array_keys( array_filter( $site['plugins'], function ( $p ) { return in_array( $p['state'] ?? '', [ 'active', 'sent' ], true ); } ) );
         if ( ! $slugs ) $slugs = [ 'elementor-pro', 'gravityforms', 'learndash', 'wp-fusion', 'automatorwp-pro', 'wp-all-import-pro' ];
-        $lines = array_map( function ( $s ) { return '- ' . DFY_License_Remote::label( $s ) . ': ' . ( DFY_License_Remote::VENDOR_SITES[ $s ] ?? '' ); }, $slugs );
-        $name    = trim( (string) ( $site['flags']['client'] ?? '' ) );
-        $contact = (string) DFY_LH_Store::setting( 'contact_url' );
-        $subject = 'Your premium plugin licenses end on ' . self::fmt( $site['expires_at'] );
-        $body = ( $name !== '' ? "Hi {$name},\n\n" : "Hi,\n\n" )
-            . 'The premium plugin licenses included with your BuddyBoss Done-For-You project' . ( $site['site_url'] ? " ({$site['site_url']})" : '' ) . ' end on ' . self::fmt( $site['expires_at'] ) . ( $left ? " — in {$left} days" : '' ) . ".\n\n"
-            . "After that date the plugins keep working, but they no longer receive updates and support:\n\n" . implode( "\n", $lines ) . "\n\n"
-            . "To keep them updated, please purchase your own license from each plugin author (links above) and enter it in the plugin's settings"
-            . ( $contact !== '' ? ", or contact us for an alternative solution: {$contact}" : ', or contact us for an alternative solution' ) . ".\n\nThe BuddyBoss DFY team";
-        if ( $mode !== 'live' ) $body = "[TEST — this would go to: " . ( $cust !== '' ? $cust : 'no customer email on file' ) . "]\n\n" . $body;
-        $ok = wp_mail( $to, $subject, $body );
+        $mail = DFY_LH_Email::reminder( [
+            'name'      => trim( (string) ( $site['flags']['client'] ?? '' ) ),
+            'site_url'  => (string) $site['site_url'],
+            'end_date'  => self::fmt( $site['expires_at'] ),
+            'left'      => $left,
+            'plugins'   => array_map( function ( $s ) { return [ 'label' => DFY_License_Remote::label( $s ), 'url' => DFY_License_Remote::VENDOR_SITES[ $s ] ?? '' ]; }, $slugs ),
+            'contact'   => (string) DFY_LH_Store::setting( 'contact_url' ),
+            'test_note' => $mode !== 'live' ? 'TEST — in Live mode this email goes to: ' . ( $cust !== '' ? $cust : 'no customer email on file' ) : '',
+        ] );
+        // HTML email with a plain-text alternative for clients that do not show HTML.
+        $alt = function ( $phpmailer ) use ( $mail ) { $phpmailer->AltBody = $mail['text']; };
+        add_action( 'phpmailer_init', $alt );
+        $ok = wp_mail( $to, $mail['subject'], $mail['html'], [ 'Content-Type: text/html; charset=UTF-8' ] );
+        remove_action( 'phpmailer_init', $alt );
         DFY_LH_Store::log( $site['id'], ( $ok ? 'Expiry reminder emailed to ' : 'Could not email the expiry reminder to ' ) . $to . ( $mode !== 'live' ? ' (test mode; customer: ' . ( $cust !== '' ? $cust : 'none' ) . ')' : '' ) . '.' );
         return [ 'ok' => (bool) $ok, 'msg' => $ok ? "sent to {$to}" : "wp_mail failed for {$to} (check the hub's email/SMTP setup)" ];
     }

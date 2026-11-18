@@ -432,6 +432,7 @@ DFY_LH_Engine::daily(); DFY_LH_Engine::daily();
 $cm = array_values( array_filter( $GLOBALS['mail_log'], function ( $m ) { return strpos( $m['subject'], 'Your premium plugin licenses end' ) === 0; } ) );
 ok( count( $cm ) === 1 && $cm[0]['to'] === 'tester@example.com', 'one reminder, sent to the test address (not the customer)' );
 ok( strpos( $cm[0]['body'], 'TEST' ) !== false && strpos( $cm[0]['body'], 'customer@example.com' ) !== false && strpos( $cm[0]['body'], 'Hi Casey' ) !== false && strpos( $cm[0]['body'], 'https://www.learndash.com/' ) !== false && strpos( $cm[0]['body'], 'https://dfy.example.com/contact' ) !== false, 'email: name, vendor links, contact link, test banner' );
+ok( strpos( $cm[0]['body'], '<!doctype html>' ) === 0 && strpos( $cm[0]['body'], 'Book your call' ) !== false && strpos( $cm[0]['body'], 'href="https://dfy.example.com/contact"' ) !== false && strpos( $cm[0]['body'], '<script' ) === false, 'HTML email with a "Book your call" button to the contact link' );
 DFY_LH_Store::update( $id22, [ 'expires_at' => gmdate( 'Y-m-d H:i:s', time() + 5 * 86400 ) ] ); $GLOBALS['mail_log'] = [];
 DFY_LH_Engine::daily();
 ok( count( array_filter( $GLOBALS['mail_log'], function ( $m ) { return strpos( $m['subject'], 'Your premium plugin licenses end' ) === 0; } ) ) === 1, '7-day reminder sent once more' );
