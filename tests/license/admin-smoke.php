@@ -5,7 +5,7 @@ require __DIR__ . '/vendor-stubs.php';
 foreach ( [ 'esc_html', 'esc_attr', 'esc_textarea', 'esc_url', 'esc_js' ] as $f ) eval( "function $f(\$s){ return htmlspecialchars((string)\$s, ENT_QUOTES); }" );
 function current_user_can( $c ) { return true; } function wp_nonce_field( $a ) { echo "<nonce $a>"; } function submit_button( $t = '', $c = '' ) { echo "<button>$t</button>"; }
 function checked( $a, $b, $e = true ) { return $a == $b ? 'checked' : ''; } function human_time_diff( $t ) { return '1 hour'; } function wp_unslash( $s ) { return $s; }
-function wp_create_nonce( $a ) { return 'n'; } function nocache_headers() {} function selected( $a, $b, $e = true ) { return $a == $b ? ' selected' : ''; } function get_current_user_id() { return 1; } function get_user_meta() { return ''; } function nl2br_( $s ) { return $s; }
+function wp_create_nonce( $a ) { return 'n'; } function nocache_headers() {} function wp_next_scheduled_x() {} function selected( $a, $b, $e = true ) { return $a == $b ? ' selected' : ''; } function get_current_user_id() { return 1; } function get_user_meta() { return ''; } function nl2br_( $s ) { return $s; }
 require $SRC . '/dfy-license-hub/dfy-license-hub.php';
 require $SRC . '/dfy-license-manager/dfy-license-manager.php';
 require_once $SRC . '/dfy-license-hub/includes/class-lh-admin.php';
@@ -42,7 +42,7 @@ $checks = [
 $idNew = DFY_LH_Store::create( [ 'label' => 'Brand New Site', 'site_url' => 'https://brandnew.example.com', 'asana_project' => '' ] );
 DFY_LH_Admin::import_lines( "Undated Ref | | https://app.asana.com/1/1/project/77 | |" );
 $def = $list( [] );
-preg_match_all( '~<tr( class="dfy-urgent")?><td>(\d+)</td><td><a [^>]+><strong>([^<]+)</strong>~', $def, $mm, PREG_SET_ORDER );
+preg_match_all( '~<tr( class="dfy-(?:urgent|soon)")?><td>(\d+)</td><td><a [^>]+><strong>([^<]+)</strong>~', $def, $mm, PREG_SET_ORDER );
 $order = array_map( function ( $m ) { return $m[3]; }, $mm );
 $checks += [
   'popup 30 days before' => strpos( $popup, 'dfy-lm-popup' ) !== false && strpos( $popup, 'end in 10 days' ) !== false && strpos( $popup, 'buy a license from the plugin author' ) !== false && strpos( $popup, 'I understand' ) !== false,
@@ -50,7 +50,7 @@ $checks += [
   'then newest start date' => array_search( 'A', $order ) < array_search( 'Zeta Club', $order ),
   'undated reference goes last' => end( $order ) === 'Undated Ref',
   'serial numbers' => ( $mm[0][2] ?? '' ) === '1' && ( $mm[1][2] ?? '' ) === '2',
-  'ending in 10 days is red' => (bool) array_filter( $mm, function ( $m ) { return $m[3] === 'A' && $m[1] !== ''; } ) && strpos( $def, 'Ends in 10 days' ) !== false,
+  'ending in 10 days is yellow' => strpos( $def, 'class="dfy-soon"><td>' ) !== false && strpos( $def, 'Ends in 10 days' ) !== false,
   'not urgent is not red' => (bool) array_filter( $mm, function ( $m ) { return $m[3] === 'Brand New Site' && $m[1] === ''; } ),
 ];
 // Client screen after the licenses ended + reference rows in the hub list.
@@ -83,6 +83,12 @@ $checks += [
   'export button' => strpos( $lst, 'dfy_lh_export' ) !== false && strpos( $lst, 'Export these' ) !== false,
   'ended filter option' => strpos( $lst, 'Ended / expired' ) !== false,
   'add form customer fields' => strpos( $add, 'name="client"' ) !== false && strpos( $add, 'name="email"' ) !== false,
+];
+$set = $list( [ 'tab' => 'settings' ] );
+$checks += [
+  'settings: encryption status' => strpos( $set, 'No permanent key' ) !== false,
+  'settings: cron test button' => strpos( $set, 'Send test email through WP-Cron' ) !== false && strpos( $set, 'Daily license check' ) !== false,
+  'settings: customer email mode' => strpos( $set, 'name="customer_mail"' ) !== false && strpos( $set, 'name="customer_test_to"' ) !== false,
 ];
 foreach ( $checks as $k => $v ) echo ( $v ? 'ok   ' : 'FAIL ' ) . "list: $k\n";
 echo implode( ',', $len ), "\n", ( strpos( $o, 'premium licenses end on' ) !== false ? 'notice ok' : 'notice MISSING' ), "\n", ( strpos( $hub, 'Licenses on this site' ) !== false && strpos( $hub, 'active' ) !== false ? 'hub site ok' : 'hub site MISSING' ), "\n";

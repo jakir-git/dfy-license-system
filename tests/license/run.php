@@ -415,5 +415,43 @@ $f = site( $c3 )['flags']; $f['detect_start'] = 1; DFY_LH_Store::update( $c3, [ 
 ok( site( $c3 )['start_source'] === 'connected' && ! DFY_LH_Engine::is_expired( site( $c3 ) ) && DFY_LH_Engine::keeps( site( $c3 ) ), 'only template dates -> no guess, starts today, licenses kept' );
 $GLOBALS['site_dates'] = [];
 
+echo "\n26. LearnDash: an expired key is not taken over; the agency key is activated\n";
+DFY_LH_Store::save_license( 'learndash', 'LD-KEY-3333', 'dfy@example.com' );
+reset_client( 'https://ld.example.com' );
+update_site_option( 'nss_plugin_license_sfwd_lms', 'LD-OLD-EXPIRED' ); $GLOBALS['ld_expired'] = true;
+$id22 = DFY_LH_Store::create( [ 'label' => 'LD', 'site_url' => 'https://ld.example.com', 'asana_project' => '' ] ); DFY_LH_Rest::new_token( $id22 );
+DFY_LH_Rest::ping( $id22 ); $GLOBALS['ld_expired'] = false;
+ok( get_site_option( 'nss_plugin_license_sfwd_lms' ) === 'LD-KEY-3333' && ( site( $id22 )['plugins']['learndash']['state'] ?? '' ) === 'active', 'expired LearnDash key replaced by the agency key' );
+
+echo "\n27. Customer reminder emails (test mode -> test address only)\n";
+DFY_LH_Store::save_settings( [ 'customer_mail' => 'test', 'customer_test_to' => 'tester@example.com', 'contact_url' => 'https://dfy.example.com/contact' ] );
+$f = site( $id22 )['flags']; $f['email'] = 'customer@example.com'; $f['client'] = 'Casey'; DFY_LH_Store::update( $id22, [ 'flags' => $f ] );
+DFY_LH_Engine::set_start( $id22, gmdate( 'Y-m-d H:i:s', time() - 340 * 86400 ), 'manual' );
+$GLOBALS['mail_log'] = [];
+DFY_LH_Engine::daily(); DFY_LH_Engine::daily();
+$cm = array_values( array_filter( $GLOBALS['mail_log'], function ( $m ) { return strpos( $m['subject'], 'Your premium plugin licenses end' ) === 0; } ) );
+ok( count( $cm ) === 1 && $cm[0]['to'] === 'tester@example.com', 'one reminder, sent to the test address (not the customer)' );
+ok( strpos( $cm[0]['body'], 'TEST' ) !== false && strpos( $cm[0]['body'], 'customer@example.com' ) !== false && strpos( $cm[0]['body'], 'Hi Casey' ) !== false && strpos( $cm[0]['body'], 'https://www.learndash.com/' ) !== false && strpos( $cm[0]['body'], 'https://dfy.example.com/contact' ) !== false, 'email: name, vendor links, contact link, test banner' );
+DFY_LH_Store::update( $id22, [ 'expires_at' => gmdate( 'Y-m-d H:i:s', time() + 5 * 86400 ) ] ); $GLOBALS['mail_log'] = [];
+DFY_LH_Engine::daily();
+ok( count( array_filter( $GLOBALS['mail_log'], function ( $m ) { return strpos( $m['subject'], 'Your premium plugin licenses end' ) === 0; } ) ) === 1, '7-day reminder sent once more' );
+DFY_LH_Store::save_settings( [ 'customer_mail' => 'live' ] ); $GLOBALS['mail_log'] = [];
+$r = DFY_LH_Engine::customer_reminder( site( $id22 ) );
+ok( $r['ok'] && $GLOBALS['mail_log'][0]['to'] === 'customer@example.com' && strpos( $GLOBALS['mail_log'][0]['body'], 'TEST' ) === false, 'live mode: goes to the customer' );
+$f = site( $id22 )['flags']; $f['keep_licenses'] = 1; unset( $f['cust_mail_30'], $f['cust_mail_7'] ); DFY_LH_Store::update( $id22, [ 'flags' => $f ] ); $GLOBALS['mail_log'] = [];
+DFY_LH_Engine::daily();
+ok( ! array_filter( $GLOBALS['mail_log'], function ( $m ) { return strpos( $m['subject'], 'Your premium plugin licenses end' ) === 0; } ), '"keep licenses" sites get no reminder' );
+DFY_LH_Store::save_settings( [ 'customer_mail' => 'test' ] );
+
+echo "\n28. Permanent encryption key: existing data re-encrypted, still readable\n";
+$before = DFY_LH_Store::licenses()['gravityforms']['key']; $sec = DFY_Crypto::decrypt( (string) site( $id22 )['secret_enc'] );
+define( 'DFY_LICENSE_ENC_KEY', 'test-permanent-key-0123456789' );
+ok( DFY_LH_Store::licenses()['gravityforms']['key'] === $before, 'old data readable right after adding the key' );
+DFY_LH_Store::maybe_reencrypt();
+$raw = (array) get_option( 'dfy_lh_licenses' );
+ok( DFY_LH_Store::licenses()['gravityforms']['key'] === $before && DFY_Crypto::decrypt( (string) site( $id22 )['secret_enc'] ) === $sec && get_option( 'dfy_lh_key_id' ) === DFY_Crypto::key_id(), 're-encrypted with the permanent key; keys and site secrets intact' );
+DFY_LM_Client::heartbeat();
+ok( site( $id22 )['last_seen'] !== null && DFY_LM_Client::get()['last_error'] === '', 'connected site keeps checking in (signatures still valid)' );
+
 echo "\n$pass passed, $fail failed\n";
 exit( $fail ? 1 : 0 );

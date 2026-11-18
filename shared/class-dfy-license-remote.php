@@ -34,6 +34,13 @@ class DFY_License_Remote {
 
     const WPAI_API = 'https://update.wpallimport.com/check_license';
 
+    /** Where customers buy their own license. */
+    const VENDOR_SITES = [
+        'elementor-pro' => 'https://elementor.com/pro/', 'gravityforms' => 'https://www.gravityforms.com/', 'learndash' => 'https://www.learndash.com/',
+        'wp-fusion' => 'https://wpfusion.com/', 'automatorwp-pro' => 'https://automatorwp.com/', 'wp-all-import-pro' => 'https://www.wpallimport.com/',
+        'uncanny-automator-pro' => 'https://automatorplugin.com/',
+    ];
+
     public static function label( string $slug ): string {
         return self::VENDORS[ $slug ] ?? $slug;
     }

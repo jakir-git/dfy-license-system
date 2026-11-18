@@ -93,13 +93,27 @@ class DFY_LM_Vendors {
             case 'elementor-pro':
                 return method_exists( 'ElementorPro\License\API', 'is_license_active' ) ? (bool) \ElementorPro\License\API::is_license_active() : null;
             case 'gravityforms':          return self::gf_valid();
-            case 'learndash':             return get_site_option( 'nss_plugin_license_sfwd_lms', '' ) !== '';
+            case 'learndash':             return self::ld_valid();
             case 'wp-fusion':             return function_exists( 'wpf_get_option' ) ? wpf_get_option( 'license_status' ) === 'valid' : null;
             case 'uncanny-automator-pro': return get_option( 'uap_automator_pro_license_status', '' ) === 'valid';
             case 'automatorwp-pro':       return function_exists( 'rgc_cmb2_edd_license_status' ) ? rgc_cmb2_edd_license_status( self::stored_key( 'automatorwp-pro' ) ) === 'valid' : null;
             case 'wp-all-import-pro':     $o = (array) get_option( 'PMXI_Plugin_Options', [] ); return ( $o['statuses']['PMXI_Plugin'] ?? '' ) === 'valid';
         }
         return null;
+    }
+
+    /**
+     * LearnDash: a saved key is not enough (an expired key stays saved). LearnDash's own
+     * check reads its cached license status and re-checks with LearnDash when it is old.
+     * @return bool|null
+     */
+    private static function ld_valid(): ?bool {
+        if ( get_site_option( 'nss_plugin_license_sfwd_lms', '' ) === '' ) return false;
+        try {
+            if ( function_exists( 'learndash_is_learndash_license_valid' ) ) return (bool) learndash_is_learndash_license_valid();
+            if ( function_exists( 'learndash_is_license_hub_valid' ) ) return (bool) learndash_is_license_hub_valid();
+        } catch ( \Throwable $e ) { return null; }
+        return null; // older LearnDash: cannot tell
     }
 
     /**

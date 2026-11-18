@@ -15,7 +15,7 @@ class DFY_LH_Engine {
         $expires = gmdate( 'Y-m-d H:i:s', strtotime( $start_utc . ' UTC' ) + $days * self::DAY );
         $site    = DFY_LH_Store::get( $id );
         $flags   = $site ? $site['flags'] : [];
-        foreach ( array_keys( $flags ) as $f ) if ( strpos( $f, 'warned_' ) === 0 || in_array( $f, [ 'expired_noted', 'manual_removed' ], true ) ) unset( $flags[ $f ] );
+        foreach ( array_keys( $flags ) as $f ) if ( strpos( $f, 'warned_' ) === 0 || in_array( $f, [ 'expired_noted', 'manual_removed', 'cust_mail_30', 'cust_mail_7' ], true ) ) unset( $flags[ $f ] );
         DFY_LH_Store::update( $id, [ 'start_at' => $start_utc, 'start_source' => $source, 'expires_at' => $expires, 'flags' => $flags ] );
         DFY_LH_Store::log( $id, "Clock started ({$source}) on " . self::fmt( $start_utc ) . '; licenses expire on ' . self::fmt( $expires ) . '.' );
     }
@@ -83,6 +83,9 @@ class DFY_LH_Engine {
                     break;
                 }
             }
+            DFY_LH_Store::update( $site['id'], [ 'flags' => $flags ] );
+            self::maybe_customer_reminder( DFY_LH_Store::get( $site['id'] ), $left );
+            $flags = DFY_LH_Store::get( $site['id'] )['flags'];
         }
 
         // Expired: the site removes its own licenses at its next check-in; after the grace period the hub does it.
@@ -220,8 +223,54 @@ class DFY_LH_Engine {
     }
 
     /** Completed sites kept for reference (no DFY License Manager): remind the team when their year ends. */
+    /* ── customer reminder emails ──────────────────────────── */
+
+    /** Send the 30/7-day reminder to the customer once per stage (not for "keep licenses" sites). */
+    public static function maybe_customer_reminder( array $site, int $left ): void {
+        if ( self::keeps( $site ) || $left < 1 || $left > 30 || ! in_array( $site['status'], [ 'active', 'reference' ], true ) ) return;
+        if ( $site['status'] === 'reference' && ! empty( $site['flags']['manual_removed'] ) ) return;
+        if ( DFY_LH_Store::setting( 'customer_mail' ) === 'off' ) return;
+        $stage = $left <= 7 ? 7 : 30;
+        if ( ! empty( $site['flags'][ "cust_mail_{$stage}" ] ) ) return;
+        $r = self::customer_reminder( $site );
+        if ( ! $r['ok'] && $r['msg'] === 'no customer email' ) return;
+        $flags = DFY_LH_Store::get( $site['id'] )['flags'];
+        foreach ( [ 30, 7 ] as $s2 ) if ( $s2 >= $stage ) $flags[ "cust_mail_{$s2}" ] = 1;
+        DFY_LH_Store::update( $site['id'], [ 'flags' => $flags ] );
+    }
+
+    /**
+     * Email the customer that their DFY premium plugin licenses end soon.
+     * Test mode (Settings): it goes to the test address instead of the customer.
+     * @return array{ok:bool,msg:string}
+     */
+    public static function customer_reminder( array $site ): array {
+        $mode = (string) DFY_LH_Store::setting( 'customer_mail' );
+        $cust = (string) ( $site['flags']['email'] ?? '' );
+        $to   = $mode === 'live' ? $cust : (string) DFY_LH_Store::setting( 'customer_test_to' );
+        if ( $mode === 'live' && $cust === '' ) return [ 'ok' => false, 'msg' => 'no customer email' ];
+        if ( $to === '' ) return [ 'ok' => false, 'msg' => 'no test address set (Settings tab)' ];
+        $left  = $site['expires_at'] ? max( 0, (int) ceil( ( strtotime( $site['expires_at'] . ' UTC' ) - time() ) / self::DAY ) ) : 0;
+        $slugs = array_keys( array_filter( $site['plugins'], function ( $p ) { return in_array( $p['state'] ?? '', [ 'active', 'sent' ], true ); } ) );
+        if ( ! $slugs ) $slugs = [ 'elementor-pro', 'gravityforms', 'learndash', 'wp-fusion', 'automatorwp-pro', 'wp-all-import-pro' ];
+        $lines = array_map( function ( $s ) { return '- ' . DFY_License_Remote::label( $s ) . ': ' . ( DFY_License_Remote::VENDOR_SITES[ $s ] ?? '' ); }, $slugs );
+        $name    = trim( (string) ( $site['flags']['client'] ?? '' ) );
+        $contact = (string) DFY_LH_Store::setting( 'contact_url' );
+        $subject = 'Your premium plugin licenses end on ' . self::fmt( $site['expires_at'] );
+        $body = ( $name !== '' ? "Hi {$name},\n\n" : "Hi,\n\n" )
+            . 'The premium plugin licenses included with your BuddyBoss Done-For-You project' . ( $site['site_url'] ? " ({$site['site_url']})" : '' ) . ' end on ' . self::fmt( $site['expires_at'] ) . ( $left ? " — in {$left} days" : '' ) . ".\n\n"
+            . "After that date the plugins keep working, but they no longer receive updates and support:\n\n" . implode( "\n", $lines ) . "\n\n"
+            . "To keep them updated, please purchase your own license from each plugin author (links above) and enter it in the plugin's settings"
+            . ( $contact !== '' ? ", or contact us for an alternative solution: {$contact}" : ', or contact us for an alternative solution' ) . ".\n\nThe BuddyBoss DFY team";
+        if ( $mode !== 'live' ) $body = "[TEST — this would go to: " . ( $cust !== '' ? $cust : 'no customer email on file' ) . "]\n\n" . $body;
+        $ok = wp_mail( $to, $subject, $body );
+        DFY_LH_Store::log( $site['id'], ( $ok ? 'Expiry reminder emailed to ' : 'Could not email the expiry reminder to ' ) . $to . ( $mode !== 'live' ? ' (test mode; customer: ' . ( $cust !== '' ? $cust : 'none' ) . ')' : '' ) . '.' );
+        return [ 'ok' => (bool) $ok, 'msg' => $ok ? "sent to {$to}" : "wp_mail failed for {$to} (check the hub's email/SMTP setup)" ];
+    }
+
     /** @return bool true when this reference site's year just ended (reported once) */
     public static function check_reference( array $site ): bool {
+        if ( $site['expires_at'] && ! self::is_expired( $site ) ) self::maybe_customer_reminder( $site, (int) ceil( ( strtotime( $site['expires_at'] . ' UTC' ) - time() ) / self::DAY ) );
         if ( ! $site['expires_at'] || ! self::is_expired( $site ) || ! empty( $site['flags']['expired_noted'] ) ) return false;
         $site['flags']['expired_noted'] = 1;
         DFY_LH_Store::update( $site['id'], [ 'flags' => $site['flags'] ] );

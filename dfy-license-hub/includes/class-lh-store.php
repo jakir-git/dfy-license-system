@@ -17,6 +17,8 @@ class DFY_LH_Store {
         'test_mode'       => 1,             // log instead of removing (on by default until you are happy)
         'contact_url'     => '',            // shown to customers when their DFY licenses end
         'asana_token'     => '',            // optional, encrypted: fills customer name/email from the Asana link
+        'customer_mail'   => 'test',        // off | test (all customer emails go to customer_test_to) | live
+        'customer_test_to'=> '',
     ];
 
     public static function table(): string {
@@ -77,6 +79,27 @@ class DFY_LH_Store {
             'plugins' => [], 'urls' => [], 'start_at' => null, 'start_source' => '', 'expires_at' => null, 'command' => '',
             'flags' => array_intersect_key( (array) ( self::get( $id )['flags'] ?? [] ), [ 'asana_url' => 1 ] ),
         ] );
+    }
+
+    /**
+     * DFY_LICENSE_ENC_KEY was added (or changed): re-encrypt everything stored so it no longer
+     * depends on the WordPress salts. Data written with the salt key is still readable (fallback).
+     */
+    public static function maybe_reencrypt(): void {
+        if ( ! DFY_Crypto::has_own_key() || get_option( 'dfy_lh_key_id' ) === DFY_Crypto::key_id() ) return;
+        $lic = (array) get_option( 'dfy_lh_licenses', [] );
+        foreach ( $lic as $k => $row ) $lic[ $k ]['key'] = DFY_Crypto::reencrypt( (string) ( $row['key'] ?? '' ) );
+        update_option( 'dfy_lh_licenses', $lic, false );
+        $set = (array) get_option( 'dfy_lh_settings', [] );
+        if ( ! empty( $set['asana_token'] ) ) { $set['asana_token'] = DFY_Crypto::reencrypt( (string) $set['asana_token'] ); update_option( 'dfy_lh_settings', $set, false ); }
+        foreach ( self::all() as $s ) {
+            self::update( (int) $s['id'], [
+                'token_enc'  => DFY_Crypto::reencrypt( (string) $s['token_enc'] ),
+                'secret_enc' => DFY_Crypto::reencrypt( (string) $s['secret_enc'] ),
+                'meta_enc'   => DFY_Crypto::reencrypt( (string) $s['meta_enc'] ),
+            ] );
+        }
+        update_option( 'dfy_lh_key_id', DFY_Crypto::key_id(), false );
     }
 
     public static function asana_token(): string { return DFY_Crypto::decrypt( (string) self::setting( 'asana_token' ) ); }

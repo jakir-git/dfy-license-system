@@ -2,7 +2,7 @@
 /**
  * Plugin Name: DFY License Hub
  * Description: Central control for BuddyBoss DFY premium licenses. Starts each site's 1-year period when it connects, tells the DFY License Manager on the client site when to remove licenses, and removes them directly from the vendors if the site stops reporting.
- * Version:     1.11.0
+ * Version:     1.12.0
  * Author:      BuddyBoss DFY
  * Requires PHP: 7.4
  * Requires at least: 6.0
@@ -10,7 +10,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'DFY_LH_VERSION', '1.11.0' );
+define( 'DFY_LH_VERSION', '1.12.0' );
 define( 'DFY_LH_FILE', __FILE__ );
 define( 'DFY_LH_DIR', __DIR__ );
 
@@ -50,7 +50,14 @@ add_action( 'plugins_loaded', function () {
     }
 } );
 
+add_action( 'plugins_loaded', [ 'DFY_LH_Store', 'maybe_reencrypt' ], 20 );
 add_action( 'dfy_lh_daily', [ 'DFY_LH_Engine', 'daily' ] );
+
+// WP-Cron self-test: Settings → "Send test email through WP-Cron".
+add_action( 'dfy_lh_cron_test', function ( $to, $queued ) {
+    $ok = wp_mail( $to, '[DFY Licenses] WP-Cron test', "This email was sent by WP-Cron on " . home_url() . ".\n\nQueued: " . gmdate( 'Y-m-d H:i:s', (int) $queued ) . " UTC\nSent:   " . gmdate( 'Y-m-d H:i:s' ) . " UTC\n\nThe daily DFY license check runs the same way." );
+    update_option( 'dfy_lh_cron_test', [ 'queued' => (int) $queued, 'ran' => time(), 'to' => $to, 'mail' => (bool) $ok ], false );
+}, 10, 2 );
 add_action( 'rest_api_init', [ 'DFY_LH_Rest', 'routes' ] );
 // If the hub site uses BuddyBoss "Private REST APIs", client sites must still reach these (they check their own code / signature).
 add_filter( 'bb_exclude_endpoints_from_restriction', function ( $endpoints ) {

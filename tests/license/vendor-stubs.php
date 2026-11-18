@@ -28,6 +28,7 @@ namespace {
     define( 'AUTOMATOR_PRO_ITEM_ID', 506 );
     define( 'AUTOMATOR_PRO_LICENSING_URL', 'https://licensing.uncannyowl.com/' );
     class GFForms {}
+    function learndash_is_learndash_license_valid() { return get_site_option( 'nss_plugin_license_sfwd_lms' ) !== 'LD-OLD-EXPIRED'; }
     class GFCommon { static function get_version_info( $c ) { return get_option( 'rg_gforms_key' ) === md5( 'GF-EXPIRED' ) ? [ 'is_valid_key' => true, 'status' => 'gravityapi_expired_license' ] : [ 'is_valid_key' => true, 'status' => 'valid_key' ]; } }
     class GFFormsModel {
         static function save_key( $k ) {

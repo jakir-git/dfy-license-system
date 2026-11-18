@@ -10,7 +10,7 @@ class DFY_LH_Admin {
         add_action( 'admin_menu', function () {
             add_menu_page( 'DFY Licenses', 'DFY Licenses', self::CAP, self::PAGE, [ __CLASS__, 'render' ], 'dashicons-shield', 81 );
         } );
-        foreach ( [ 'add_site', 'site_action', 'save_licenses', 'save_settings', 'run_now', 'import', 'export', 'asana_fill' ] as $a ) {
+        foreach ( [ 'add_site', 'site_action', 'save_licenses', 'save_settings', 'run_now', 'import', 'export', 'asana_fill', 'cron_test' ] as $a ) {
             add_action( "admin_post_dfy_lh_{$a}", [ __CLASS__, $a ] );
         }
     }
@@ -258,6 +258,9 @@ class DFY_LH_Admin {
                 DFY_LH_Store::update( $id, [ 'flags' => $f ] );
                 DFY_LH_Store::log( $id, 'Licenses marked as removed by hand by ' . wp_get_current_user()->user_login . '.' );
                 self::back( $ret, $site['label'] . ': marked as removed.' );
+            case 'remind':
+                $r = DFY_LH_Engine::customer_reminder( $site );
+                self::back( $ret, $site['label'] . ': expiry reminder ' . $r['msg'] . '.', ! $r['ok'] );
             case 'checkin':
                 if ( $site['status'] !== 'active' ) self::back( $ret, 'Only connected sites can check in.', true );
                 DFY_LH_Rest::ping( $id, 'checkin' );
@@ -303,6 +306,8 @@ class DFY_LH_Admin {
             'silent_remove' => max( 0, (int) ( $_POST['silent_remove'] ?? 7 ) ),
             'test_mode'     => empty( $_POST['test_mode'] ) ? 0 : 1,
             'contact_url'   => esc_url_raw( trim( wp_unslash( $_POST['contact_url'] ?? '' ) ) ),
+            'customer_mail' => in_array( $_POST['customer_mail'] ?? '', [ 'off', 'test', 'live' ], true ) ? $_POST['customer_mail'] : 'test',
+            'customer_test_to' => sanitize_email( wp_unslash( $_POST['customer_test_to'] ?? '' ) ),
         ];
         $tok = trim( (string) wp_unslash( $_POST['asana_token'] ?? '' ) );
         if ( $tok !== '' ) $in['asana_token'] = DFY_Crypto::encrypt( $tok );
@@ -442,7 +447,8 @@ class DFY_LH_Admin {
             $arrow = $sort === $key ? ( $dir === 'asc' ? ' ▲' : ' ▼' ) : '';
             return '<th><a href="' . esc_url( $url ) . '">' . esc_html( $label . $arrow ) . '</a></th>';
         };
-        echo '<style>.dfy-urgent td{background:#fcf0f1!important}.dfy-urgent td:first-child{box-shadow:inset 4px 0 0 #d63638}.dfy-red{color:#d63638;font-weight:600}</style>';
+        echo '<style>.dfy-urgent td{background:#fcf0f1!important}.dfy-urgent td:first-child{box-shadow:inset 4px 0 0 #d63638}.dfy-red{color:#d63638;font-weight:600}.dfy-soon td{background:#fcf9e8!important}.dfy-soon td:first-child{box-shadow:inset 4px 0 0 #dba617}.dfy-soon .dfy-red{color:#996800}</style>';
+        echo '<p style="margin:4px 0 8px;color:#646970"><span style="display:inline-block;width:12px;height:12px;background:#fcf9e8;border-left:4px solid #dba617;vertical-align:middle"></span> ends within 30 days &nbsp; <span style="display:inline-block;width:12px;height:12px;background:#fcf0f1;border-left:4px solid #d63638;vertical-align:middle"></span> ended — action needed</p>';
         echo '<table class="widefat striped"><thead><tr><th style="width:36px">#</th>' . $th( 'label', 'Site' ) . '<th>Status</th>' . $th( 'start', 'Start date' ) . $th( 'expires', 'Licenses expire' ) . $th( 'last_seen', 'Last check-in' ) . '<th>Licenses</th><th style="width:300px">Actions</th></tr></thead><tbody>';
         if ( ! $sites ) echo '<tr><td colspan="8">No sites match.</td></tr>';
         $n = 0;
@@ -451,7 +457,7 @@ class DFY_LH_Admin {
             $u = self::urgency( $s );
             $lic = [];
             foreach ( $s['plugins'] as $slug => $p ) if ( ( $p['state'] ?? '' ) !== 'not_installed' ) $lic[] = DFY_License_Remote::label( $slug ) . ' (' . str_replace( '_', ' ', $p['state'] ) . ')';
-            echo '<tr' . ( $u ? ' class="dfy-urgent"' : '' ) . '><td>' . $n . '</td><td><a href="' . esc_url( self::url( [ 'site' => $s['id'] ] ) ) . '"><strong>' . esc_html( $s['label'] ) . '</strong></a><br><small>' . ( $s['site_url'] !== '' ? '<a href="' . esc_url( $s['site_url'] ) . '" target="_blank" rel="noopener">' . esc_html( $s['site_url'] ) . '</a>' : 'no site URL' ) . ( ! empty( $s['flags']['client'] ) ? '<br>' . esc_html( $s['flags']['client'] ) : '' ) . ( ! empty( $s['flags']['email'] ) ? ( empty( $s['flags']['client'] ) ? '<br>' : ' · ' ) . '<a href="mailto:' . esc_attr( $s['flags']['email'] ) . '">' . esc_html( $s['flags']['email'] ) . '</a>' : '' ) . '</small></td>';
+            echo '<tr' . ( $u ? ' class="' . ( strpos( $u, 'Ends in' ) === 0 ? 'dfy-soon' : 'dfy-urgent' ) . '"' : '' ) . '><td>' . $n . '</td><td><a href="' . esc_url( self::url( [ 'site' => $s['id'] ] ) ) . '"><strong>' . esc_html( $s['label'] ) . '</strong></a><br><small>' . ( $s['site_url'] !== '' ? '<a href="' . esc_url( $s['site_url'] ) . '" target="_blank" rel="noopener">' . esc_html( $s['site_url'] ) . '</a>' : 'no site URL' ) . ( ! empty( $s['flags']['client'] ) ? '<br>' . esc_html( $s['flags']['client'] ) : '' ) . ( ! empty( $s['flags']['email'] ) ? ( empty( $s['flags']['client'] ) ? '<br>' : ' · ' ) . '<a href="mailto:' . esc_attr( $s['flags']['email'] ) . '">' . esc_html( $s['flags']['email'] ) . '</a>' : '' ) . '</small></td>';
             echo '<td>' . self::badge( $s ) . '</td>';
             echo '<td>' . esc_html( $s['start_at'] ? self::num_date( $s['start_at'] ) : '-' ) . ( $s['start_at'] ? '<br><small style="color:#646970">' . esc_html( [ 'manual' => 'set by hand', 'completed' => 'project completed', 'connected' => 'when connected', 'detected' => 'found on the site' ][ $s['start_source'] ] ?? $s['start_source'] ) . '</small>' : '' ) . '</td>';
             echo '<td' . ( $u ? ' class="dfy-red"' : '' ) . '>' . esc_html( $s['expires_at'] ? self::num_date( $s['expires_at'] ) : '-' ) . ( $u ? '<br><small class="dfy-red">' . esc_html( $u ) . '</small>' : '' ) . '</td>';
@@ -512,6 +518,11 @@ class DFY_LH_Admin {
         if ( $s['status'] === 'reference' && $wide ) {
             self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'track' ] );
             echo '<button class="button button-small" title="Use this once DFY License Manager is installed on the site">Track with DFY License Manager</button></form>';
+        }
+        if ( $wide && in_array( $s['status'], [ 'active', 'reference' ], true ) && $s['expires_at'] && ! DFY_LH_Engine::keeps( $s ) ) {
+            self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'remind' ] );
+            $m = (string) DFY_LH_Store::setting( 'customer_mail' );
+            echo '<button class="button button-small" title="' . esc_attr( $m === 'live' ? 'Sends to ' . ( $s['flags']['email'] ?? 'the customer' ) : 'Test mode: sends to the test address on the Settings tab' ) . '">Send expiry reminder email</button></form>';
         }
         self::form_open( 'dfy_lh_site_action', [ 'site' => $s['id'], 'do' => 'delete' ] );
         $q = $s['status'] === 'active'
@@ -662,9 +673,44 @@ class DFY_LH_Admin {
         $f( 'silent_remove', 'Remove when silent (days)', '<input type="number" min="0" name="silent_remove" value="' . esc_attr( $s['silent_remove'] ) . '">', 'Remove licenses if a connected site stops checking in for this long (plugin deleted by FTP, site gone). 0 = never.' );
         $f( 'asana_token', 'Asana token (optional)', '<input type="password" autocomplete="new-password" name="asana_token" class="regular-text" placeholder="' . ( DFY_LH_Store::asana_token() !== '' ? 'saved' : 'not set' ) . '"> <label><input type="checkbox" name="clear_token" value="1"> clear</label>', 'Only used to fill the customer name and email from a site\'s Asana project (Customer First/Last Name and CONTACT EMAIL). Asana → profile → Settings → Apps → Developer apps → Personal access token. Stored encrypted.' );
         $f( 'contact_url', 'Customer contact link', '<input name="contact_url" type="url" class="large-text" value="' . esc_attr( $s['contact_url'] ) . '" placeholder="https://… or mailto:…">', 'Shown on client sites when their DFY licenses end: "buy your own license from each vendor, or contact BuddyBoss DFY for an alternative solution".' );
+        $f( 'customer_mail', 'Customer reminder emails', '<select name="customer_mail">'
+            . '<option value="test"' . selected( $s['customer_mail'], 'test', false ) . '>Test — send every customer email to the test address below</option>'
+            . '<option value="live"' . selected( $s['customer_mail'], 'live', false ) . '>Live — send to each customer\'s email</option>'
+            . '<option value="off"' . selected( $s['customer_mail'], 'off', false ) . '>Off</option></select>'
+            . '<p><input type="email" name="customer_test_to" class="regular-text" value="' . esc_attr( $s['customer_test_to'] ) . '" placeholder="Test address"></p>',
+            'Customers get an email 30 and 7 days before their DFY licenses end (with links to buy from each plugin author and your contact link). Sites marked "keep licenses" are skipped.' );
         $f( 'test_mode', 'Test mode', '<label><input type="checkbox" name="test_mode" value="1" ' . checked( $s['test_mode'], 1, false ) . '> Only log what would be removed</label>', 'Customers deactivating or deleting DFY License Manager still remove licenses, and "Deactivate licenses" still works.' );
         echo '</table>';
         submit_button( 'Save settings' );
         echo '</form>';
+
+        // Encryption key status.
+        echo '<hr><h2>Encryption</h2>';
+        echo DFY_Crypto::has_own_key()
+            ? '<p><span style="color:#008a20;font-weight:600">✓ Permanent key set</span> (DFY_LICENSE_ENC_KEY in wp-config.php). Stored keys no longer depend on the WordPress salts.</p>'
+            : '<p><span style="color:#d63638;font-weight:600">✗ No permanent key.</span> License keys and site secrets are encrypted with this site\'s WordPress salts; if the salts change, they can no longer be read. Add this line to wp-config.php (above "That\'s all, stop editing"), with your own long random value:</p><p><code>define( \'DFY_LICENSE_ENC_KEY\', \'…64 random characters…\' );</code></p><p class="description">Existing data is re-encrypted with the new key automatically on the next page load. Keep a copy of the key; never change or remove it afterwards.</p>';
+
+        // WP-Cron health.
+        $next = wp_next_scheduled( 'dfy_lh_daily' );
+        $last = (int) get_option( 'dfy_lh_last_run' );
+        $test = (array) get_option( 'dfy_lh_cron_test', [] );
+        echo '<hr><h2>Scheduled tasks (WP-Cron)</h2><table class="widefat striped" style="max-width:760px"><tbody>';
+        echo '<tr><th style="width:220px">Daily license check</th><td>' . ( $next ? 'next run ' . esc_html( wp_date( 'M j, Y H:i', $next ) ) . ( $next < time() - HOUR_IN_SECONDS ? ' <strong style="color:#d63638">(overdue — WP-Cron is not running)</strong>' : '' ) : '<strong style="color:#d63638">not scheduled</strong>' ) . '</td></tr>';
+        echo '<tr><th>Last daily check</th><td>' . ( $last ? esc_html( wp_date( 'M j, Y H:i', $last ) ) . ( time() - $last > 2 * DAY_IN_SECONDS ? ' <strong style="color:#d63638">(more than 2 days ago)</strong>' : '' ) : 'never' ) . '</td></tr>';
+        echo '<tr><th>WP-Cron</th><td>' . ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ? 'DISABLE_WP_CRON is set — a server cron job must call wp-cron.php' : 'runs when someone visits the site (a server cron job is more reliable)' ) . '</td></tr>';
+        echo '<tr><th>Last WP-Cron test</th><td>' . ( ! empty( $test['ran'] ) ? 'queued ' . esc_html( wp_date( 'M j, H:i:s', (int) $test['queued'] ) ) . ', ran ' . esc_html( wp_date( 'M j, H:i:s', (int) $test['ran'] ) ) . ' — email to ' . esc_html( $test['to'] ) . ' ' . ( ! empty( $test['mail'] ) ? '<span style="color:#008a20">sent</span>' : '<strong style="color:#d63638">wp_mail failed (check SMTP)</strong>' ) : 'not run yet' ) . '</td></tr>';
+        echo '</tbody></table>';
+        self::form_open( 'dfy_lh_cron_test' );
+        echo '<p><input type="email" name="to" class="regular-text" required value="' . esc_attr( $s['customer_test_to'] ?: $s['notify_email'] ) . '"> <button class="button">Send test email through WP-Cron</button></p><p class="description">Queues the email as a WP-Cron task. If it arrives (and "ran" appears above within a minute or two), WP-Cron and email both work.</p></form>';
+    }
+
+    public static function cron_test(): void {
+        self::guard( 'dfy_lh_cron_test' );
+        $to = sanitize_email( wp_unslash( $_POST['to'] ?? '' ) );
+        if ( ! is_email( $to ) ) self::back( [ 'tab' => 'settings' ], 'Enter an email address.', true );
+        $q = time();
+        wp_schedule_single_event( $q, 'dfy_lh_cron_test', [ $to, $q ] );
+        if ( function_exists( 'spawn_cron' ) ) spawn_cron();
+        self::back( [ 'tab' => 'settings' ], "Test email queued for WP-Cron (to {$to}). Reload this page in a minute: \"Last WP-Cron test\" should show it ran." );
     }
 }

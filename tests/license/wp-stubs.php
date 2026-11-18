@@ -45,7 +45,7 @@ function home_url() { return $GLOBALS['home']; }
 function site_url() { return $GLOBALS['home']; }
 function network_site_url() { return $GLOBALS['home'] . '/'; }
 function get_bloginfo( $k ) { return $k === 'language' ? 'en-US' : 'Client'; }
-function wp_mail( $to, $s, $b ) { $GLOBALS['mails'][] = $s; return true; }
+function wp_mail( $to, $s, $b ) { $GLOBALS['mails'][] = $s; $GLOBALS['mail_log'][] = [ 'to' => $to, 'subject' => $s, 'body' => $b ]; return true; }
 function wp_next_scheduled( $h ) { return false; } function wp_schedule_event() {} function wp_clear_scheduled_hook( $h ) {}
 function register_activation_hook( $f, $cb ) {} function register_deactivation_hook( $f, $cb ) { $GLOBALS['hooks']['deact'][ basename( $f ) ] = $cb; }
 function add_action( ...$a ) {} function add_filter( ...$a ) {} function is_admin() { return false; } function wp_doing_ajax() { return false; }
