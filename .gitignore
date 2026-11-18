@@ -1,0 +1,41 @@
+# ── Never commit: real configuration / secrets ───────────────
+# Real DFY License Hub address (copy hub-config.example.php to create it)
+dfy-license-manager/hub-config.php
+hub-config.php
+.env
+.env.*
+*.pem
+*.key
+wp-config*.php
+auth.json
+
+# ── Never commit: customer / project data ────────────────────
+*.csv
+*.xlsx
+*.xls
+*.sql
+*.sql.gz
+completed-sites*.txt
+*import*.txt
+exports/
+backups/
+*.log
+
+# ── Third-party / vendor source used only as reference ──────
+ref/
+vendor-src/
+
+# ── Build output ─────────────────────────────────────────────
+dist/
+*.zip
+
+# ── Test output ──────────────────────────────────────────────
+tests/**/out-*.json
+tests/**/err-*.txt
+
+# ── OS / editor files ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
