@@ -16,6 +16,7 @@ class DFY_LH_Store {
         'silent_remove'   => 7,             // days without a check-in before removing remotely (0 = never)
         'test_mode'       => 1,             // log instead of removing (on by default until you are happy)
         'contact_url'     => '',            // shown to customers when their DFY licenses end
+        'asana_token'     => '',            // optional, encrypted: fills customer name/email from the Asana link
     ];
 
     public static function table(): string {
@@ -77,6 +78,8 @@ class DFY_LH_Store {
             'flags' => array_intersect_key( (array) ( self::get( $id )['flags'] ?? [] ), [ 'asana_url' => 1 ] ),
         ] );
     }
+
+    public static function asana_token(): string { return DFY_Crypto::decrypt( (string) self::setting( 'asana_token' ) ); }
 
     public static function settings(): array {
         $s = wp_parse_args( (array) get_option( 'dfy_lh_settings', [] ), self::DEFAULTS );

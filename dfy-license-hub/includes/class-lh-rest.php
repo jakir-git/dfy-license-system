@@ -126,16 +126,17 @@ class DFY_LH_Rest {
 
         // Evidence of when the DFY plugins were first set up on the site (for older projects).
         $flags = $site['flags'];
+        if ( ! empty( $flags['detect_start'] ) ) $flags['keep_licenses'] = 1; // older project: never remove automatically
         $flags['evidence']     = self::clean_evidence( $b['evidence'] ?? [] );
         $flags['connected_at'] = current_time( 'mysql', true );
         DFY_LH_Store::update( $site['id'], [ 'flags' => $flags ] );
         if ( ! $site['start_at'] ) {
-            $found = ! empty( $flags['detect_start'] ) ? self::suggested_start( $flags['evidence'] ) : null;
+            $found = ! empty( $flags['detect_start'] ) ? self::suggested_start( $flags['evidence'], self::template_dates( (int) $site['id'] ) ) : null;
             if ( $found ) {
                 DFY_LH_Engine::set_start( (int) $site['id'], $found['date'], 'detected' );
                 DFY_LH_Store::log( $site['id'], "Older project: start date taken from the site — {$found['source']} (" . DFY_LH_Engine::fmt( $found['date'] ) . ').' );
             } else {
-                if ( ! empty( $flags['detect_start'] ) ) DFY_LH_Store::log( $site['id'], 'Older project, but the site has no usable date; the period starts today. Set the right date by hand if you know it.' );
+                if ( ! empty( $flags['detect_start'] ) ) DFY_LH_Store::log( $site['id'], 'Older project: no activation date could be found on the site (dates copied from the DFY template are ignored). The period starts today; set the right date by hand if you know it.' );
                 DFY_LH_Engine::set_start( (int) $site['id'], current_time( 'mysql', true ), 'connected' ); // the 1-year period starts now
             }
         }
@@ -242,7 +243,7 @@ class DFY_LH_Rest {
 
     private static function state( array $site ): array {
         return [
-            'expires_at' => $site['expires_at'] ? gmdate( 'c', strtotime( $site['expires_at'] . ' UTC' ) ) : null,
+            'expires_at' => $site['expires_at'] && ! DFY_LH_Engine::keeps( $site ) ? gmdate( 'c', strtotime( $site['expires_at'] . ' UTC' ) ) : null, // "keep" sites never expire on their own
             'command'    => DFY_LH_Engine::command_for( $site ),
             'test_mode'  => (bool) DFY_LH_Store::setting( 'test_mode' ),
             'adopt'      => self::adopt_open( $site ),
@@ -276,9 +277,25 @@ class DFY_LH_Rest {
     }
 
     /** Earliest date a DFY premium plugin left on the site (site creation and "last check" dates are only shown, not used). */
-    public static function suggested_start( array $evidence ): ?array {
+    /**
+     * Dates found identically on more than one DFY site were copied from the DFY starter
+     * template (sites are built from a copy of it), so they say nothing about this site.
+     * @return array<string,int> "source|date" => number of sites
+     */
+    public static function template_dates( int $except_id = 0 ): array {
+        $n = [];
+        foreach ( DFY_LH_Store::all() as $x ) {
+            if ( (int) $x['id'] === $except_id ) continue;
+            foreach ( array_unique( array_map( function ( $e ) { return $e['source'] . '|' . substr( $e['date'], 0, 10 ); }, (array) ( $x['flags']['evidence'] ?? [] ) ) ) as $k ) $n[ $k ] = ( $n[ $k ] ?? 0 ) + 1;
+        }
+        return $n;
+    }
+
+    public static function is_template( array $e, array $tpl ): bool { return ! empty( $tpl[ $e['source'] . '|' . substr( $e['date'], 0, 10 ) ] ); }
+
+    public static function suggested_start( array $evidence, array $tpl = [] ): ?array {
         foreach ( $evidence as $e ) {
-            if ( $e['slug'] === 'site' || $e['slug'] === 'wp-fusion' ) continue;
+            if ( $e['slug'] === 'site' || $e['slug'] === 'wp-fusion' || self::is_template( $e, $tpl ) ) continue;
             if ( isset( DFY_License_Remote::VENDORS[ $e['slug'] ] ) ) return $e; // evidence is oldest first
         }
         return null;

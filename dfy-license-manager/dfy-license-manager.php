@@ -2,7 +2,7 @@
 /**
  * Plugin Name: DFY License Manager
  * Description: Activates the premium plugin licenses included with your BuddyBoss Done-For-You project for one year. Deactivating or deleting this plugin removes those licenses.
- * Version:     1.9.0
+ * Version:     1.9.1
  * Author:      BuddyBoss DFY
  * Requires PHP: 7.4
  * Requires at least: 6.0
@@ -10,7 +10,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'DFY_LM_VERSION', '1.9.0' );
+define( 'DFY_LM_VERSION', '1.9.1' );
 define( 'DFY_LM_FILE', __FILE__ );
 
 require_once __DIR__ . '/includes/class-dfy-crypto.php';
@@ -32,6 +32,12 @@ function dfy_lm_nocache(): void {
     if ( ! defined( 'DONOTCACHEPAGE' ) ) define( 'DONOTCACHEPAGE', true );
     nocache_headers();
 }
+
+// BuddyBoss "Private REST APIs" blocks REST for logged-out visitors; the hub must still reach these two.
+// (They are safe in public: the challenge is one-time and random, ping only makes the site call its own hub.)
+add_filter( 'bb_exclude_endpoints_from_restriction', function ( $endpoints ) {
+    return array_merge( (array) $endpoints, [ '/dfy-lm/v1/challenge', '/dfy-lm/v1/ping' ] );
+} );
 
 // Endpoints the hub calls: read back the connection challenge, and "connect now" right after Add site.
 add_action( 'rest_api_init', function () {

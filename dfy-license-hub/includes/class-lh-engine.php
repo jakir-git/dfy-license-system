@@ -33,9 +33,13 @@ class DFY_LH_Engine {
     }
 
     /** The command a site receives on its next check-in. */
+    /** Older projects: their licenses are never removed automatically, only with "Deactivate licenses". */
+    public static function keeps( array $site ): bool { return ! empty( $site['flags']['keep_licenses'] ); }
+
     public static function command_for( array $site ): string {
         if ( $site['status'] === 'removed' ) return 'remove';
         if ( $site['command'] === 'remove' ) return 'remove';
+        if ( self::keeps( $site ) ) return '';
         if ( self::is_expired( $site ) && ! DFY_LH_Store::setting( 'test_mode' ) ) return 'remove';
         return '';
     }
@@ -89,7 +93,7 @@ class DFY_LH_Engine {
             }
             DFY_LH_Store::update( $site['id'], [ 'flags' => $flags ] );
             $grace_end = strtotime( $site['expires_at'] . ' UTC' ) + (int) $s['grace_days'] * self::DAY;
-            if ( $now >= $grace_end || $site['status'] === 'pending' ) self::remote_remove( DFY_LH_Store::get( $site['id'] ), 'the license period ended and the site did not remove them itself' );
+            if ( ! self::keeps( $site ) && ( $now >= $grace_end || $site['status'] === 'pending' ) ) self::remote_remove( DFY_LH_Store::get( $site['id'] ), 'the license period ended and the site did not remove them itself' );
             return;
         }
 
@@ -104,7 +108,7 @@ class DFY_LH_Engine {
                 DFY_LH_Store::log( $site['id'], 'Stopped checking in; alert sent.' );
             }
             DFY_LH_Store::update( $site['id'], [ 'flags' => $flags ] );
-            if ( (int) $s['silent_remove'] > 0 && $silent >= (int) $s['silent_remove'] ) {
+            if ( ! self::keeps( $site ) && (int) $s['silent_remove'] > 0 && $silent >= (int) $s['silent_remove'] ) {
                 self::remote_remove( DFY_LH_Store::get( $site['id'] ), "the site has not checked in for {$s['silent_remove']} days" );
             }
         }

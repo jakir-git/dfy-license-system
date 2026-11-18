@@ -69,3 +69,16 @@ They show as "Reference only" with start/end dates; the team gets an email
 when a year ends so the licenses can be removed by hand. "Track with DFY
 License Manager" (on the site page) switches one to normal tracking once the
 plugin is installed there.
+
+== Customer details and export ==
+
+* Add site / site Details: customer name and email. With an Asana token
+  (Settings tab, optional) they are filled from the site's Asana project:
+  the "Customer First Name", "Customer Last Name" and "CONTACT EMAIL" fields
+  (on "WEB PROJECT SCOPE"), or the name after " - " in the project name.
+  Sites tab → "Fill customer name and email from Asana" does it for every
+  site with an Asana link (15 per click).
+* Sites tab → "Export these sites to Excel (CSV)": exports the sites shown
+  with the current search / status / month / year filters (e.g. status
+  "Active" or "Ended / expired"): name, customer, email, URL, status, dates,
+  days left, needs-action note, licenses, project link.

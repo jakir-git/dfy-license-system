@@ -32,6 +32,9 @@ function wp_date( $f, $ts = null ) { return gmdate( $f, $ts ?? time() ); }
 function sanitize_text_field( $s ) { return trim( strip_tags( (string) $s ) ); }
 function sanitize_key( $s ) { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $s ) ); }
 function sanitize_email( $s ) { return (string) $s; }
+if ( ! function_exists( "wp_unslash" ) ) { function wp_unslash( $s ) { return $s; } }
+function is_email( $s ) { return (bool) filter_var( $s, FILTER_VALIDATE_EMAIL ); }
+if ( ! function_exists( 'wp_nonce_url' ) ) { function wp_nonce_url( $u, $a = '' ) { return $u . ( strpos( $u, '?' ) === false ? '?' : '&' ) . '_wpnonce=n'; } }
 function esc_url_raw( $s ) { return (string) $s; }
 function wp_parse_url( $u, $c = -1 ) { return parse_url( $u, $c ); }
 function trailingslashit( $s ) { return rtrim( $s, '/' ) . '/'; }
@@ -115,6 +118,13 @@ function wp_remote_request( $url, $a = [] ) {
         if ( parse_url( $url, PHP_URL_HOST ) !== parse_url( $GLOBALS['home'], PHP_URL_HOST ) || ! empty( $GLOBALS['client_plugin_missing'] ) ) return resp( 404, [ 'code' => 'rest_no_route' ] );
         if ( strpos( $url, '/challenge' ) !== false ) { $c = DFY_LM_Client::challenge(); return $c === '' ? resp( 404, [] ) : resp( 200, [ 'challenge' => $c ] ); }
         if ( strpos( $url, '/ping' ) !== false ) return resp( 200, DFY_LM_Client::handle_ping() );
+    }
+    if ( strpos( $url, 'https://app.asana.com/api/1.0/projects/' ) === 0 && ! empty( $GLOBALS['asana_projects'] ) ) {
+        $GLOBALS['asana_calls'] = ( $GLOBALS['asana_calls'] ?? 0 ) + 1;
+        if ( ! preg_match( '~/projects/(\d+)(/tasks)?~', $url, $mm ) || empty( $GLOBALS['asana_projects'][ $mm[1] ] ) ) return resp( 404, [ 'errors' => [ [ 'message' => 'Not found' ] ] ] );
+        $p = $GLOBALS['asana_projects'][ $mm[1] ];
+        if ( empty( $mm[2] ) ) return resp( 200, [ 'data' => [ 'gid' => $mm[1], 'name' => $p['name'] ] ] );
+        return resp( 200, [ 'data' => $p['tasks'] ] );
     }
     if ( strpos( $url, 'https://app.asana.com/api/1.0' ) === 0 ) {
         $p = substr( $url, strlen( 'https://app.asana.com/api/1.0' ) );

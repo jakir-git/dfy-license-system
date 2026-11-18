@@ -5,7 +5,7 @@ require __DIR__ . '/vendor-stubs.php';
 foreach ( [ 'esc_html', 'esc_attr', 'esc_textarea', 'esc_url', 'esc_js' ] as $f ) eval( "function $f(\$s){ return htmlspecialchars((string)\$s, ENT_QUOTES); }" );
 function current_user_can( $c ) { return true; } function wp_nonce_field( $a ) { echo "<nonce $a>"; } function submit_button( $t = '', $c = '' ) { echo "<button>$t</button>"; }
 function checked( $a, $b, $e = true ) { return $a == $b ? 'checked' : ''; } function human_time_diff( $t ) { return '1 hour'; } function wp_unslash( $s ) { return $s; }
-function wp_create_nonce( $a ) { return 'n'; } function selected( $a, $b, $e = true ) { return $a == $b ? ' selected' : ''; } function get_current_user_id() { return 1; } function get_user_meta() { return ''; } function nl2br_( $s ) { return $s; }
+function wp_create_nonce( $a ) { return 'n'; } function nocache_headers() {} function selected( $a, $b, $e = true ) { return $a == $b ? ' selected' : ''; } function get_current_user_id() { return 1; } function get_user_meta() { return ''; } function nl2br_( $s ) { return $s; }
 require $SRC . '/dfy-license-hub/dfy-license-hub.php';
 require $SRC . '/dfy-license-manager/dfy-license-manager.php';
 require_once $SRC . '/dfy-license-hub/includes/class-lh-admin.php';
@@ -75,6 +75,14 @@ $checks += [
   'evidence table' => strpos( $sp, 'Dates found on the site' ) !== false && strpos( $sp, 'suggested start' ) !== false,
   'suggestion skips site creation' => strpos( $sp, 'Elementor first installed (Elementor install history) <span style="color:#008a20">← suggested start' ) !== false,
   'older project checkbox' => strpos( $add, 'name="older"' ) !== false,
+];
+$f = DFY_LH_Store::get( $id )['flags']; $f['client'] = 'Charlie Example'; $f['email'] = 'charlie@example.com'; DFY_LH_Store::update( $id, [ 'flags' => $f ] );
+$lst = $list( [] );
+$checks += [
+  'email shown in list' => strpos( $lst, 'mailto:charlie@example.com' ) !== false && strpos( $lst, 'Charlie Example' ) !== false,
+  'export button' => strpos( $lst, 'dfy_lh_export' ) !== false && strpos( $lst, 'Export these' ) !== false,
+  'ended filter option' => strpos( $lst, 'Ended / expired' ) !== false,
+  'add form customer fields' => strpos( $add, 'name="client"' ) !== false && strpos( $add, 'name="email"' ) !== false,
 ];
 foreach ( $checks as $k => $v ) echo ( $v ? 'ok   ' : 'FAIL ' ) . "list: $k\n";
 echo implode( ',', $len ), "\n", ( strpos( $o, 'premium licenses end on' ) !== false ? 'notice ok' : 'notice MISSING' ), "\n", ( strpos( $hub, 'Licenses on this site' ) !== false && strpos( $hub, 'active' ) !== false ? 'hub site ok' : 'hub site MISSING' ), "\n";

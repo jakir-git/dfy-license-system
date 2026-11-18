@@ -347,7 +347,7 @@ ok( $s18['start_source'] === 'detected' && substr( $s18['start_at'], 0, 10 ) ===
 ok( count( $s18['flags']['evidence'] ) >= 4 && $s18['flags']['evidence'][0]['slug'] === 'site', 'all dates kept for the site page (oldest first)' );
 ok( isset( DFY_LM_Client::get()['ours']['wp-fusion'] ) && get_option( 'rg_gforms_key' ) === md5( 'GF-KEY-2222' ), 'hand-activated WP Fusion taken over; unlicensed Gravity Forms activated with the agency key' );
 
-echo "\n22. Older project whose year is already over\n";
+echo "\n22. Older project whose year is already over: licenses kept\n";
 reset_client( 'https://older.example.com' );
 update_option( 'elementor_install_history', [ '3.10.0' => strtotime( '2025-03-01 UTC' ) ] );
 $GLOBALS['site_dates'] = [ 'tables' => [], 'users' => '2025-02-01 00:00:00' ];
@@ -357,7 +357,11 @@ $id19 = DFY_LH_Store::create( [ 'label' => 'Older project', 'site_url' => 'https
 $f = site( $id19 )['flags']; $f['detect_start'] = 1; DFY_LH_Store::update( $id19, [ 'flags' => $f ] );
 DFY_LH_Rest::ping( $id19 );
 ok( substr( site( $id19 )['expires_at'], 0, 10 ) === '2026-03-01' && get_option( 'rg_gforms_key', '' ) !== md5( 'GF-KEY-2222' ) && ! array_filter( $GLOBALS['calls'], function ( $c ) { return ( is_array( $c['body'] ) ? ( $c['body']['edd_action'] ?? '' ) : '' ) === 'activate_license' || strpos( $c['url'], 'activate_license' ) !== false && strpos( $c['url'], 'deactivate' ) === false; } ), 'started 2025-03-01, already over: no keys sent' );
-ok( wpf_get_option( 'license_status' ) !== 'valid' && site( $id19 )['status'] === 'removed' && DFY_LM_Client::ended(), 'existing DFY licenses taken over and removed; client shows the ended notice' );
+DFY_LM_Client::heartbeat(); DFY_LH_Engine::daily(); DFY_LM_Client::heartbeat();
+ok( wpf_get_option( 'license_status' ) === 'valid' && site( $id19 )['status'] === 'active' && ! DFY_LM_Client::ended() && isset( DFY_LM_Client::get()['ours']['wp-fusion'] ), 'older project: licenses taken over and KEPT (never removed automatically, even with test mode off)' );
+ok( DFY_LM_Client::expires_ts() === null, 'the site is not given an end date to act on by itself' );
+DFY_LH_Store::update( $id19, [ 'command' => 'remove' ] ); DFY_LH_Rest::ping( $id19, 'checkin' );
+ok( wpf_get_option( 'license_status' ) !== 'valid', '"Deactivate licenses" by hand still works' );
 
 echo "\n23. Normal new site: start is today even though dates exist\n";
 reset_client( 'https://fresh.example.com' );
@@ -365,6 +369,50 @@ update_option( 'elementor_install_history', [ '3.10.0' => strtotime( '2025-03-01
 $id20 = DFY_LH_Store::create( [ 'label' => 'Fresh', 'site_url' => 'https://fresh.example.com', 'asana_project' => '' ] ); DFY_LH_Rest::new_token( $id20 );
 DFY_LH_Rest::ping( $id20 );
 ok( site( $id20 )['start_source'] === 'connected' && ! DFY_LH_Engine::is_expired( site( $id20 ) ), 'start = connection time (dates only shown)' );
+$GLOBALS['site_dates'] = [];
+
+echo "\n24. Customer name and email from the Asana link; export\n";
+DFY_LH_Store::save_settings( [ 'asana_token' => DFY_Crypto::encrypt( 'pat-test' ) ] );
+$GLOBALS['asana_projects'] = [
+  '555' => [ 'name' => 'Demo.Com - Charlie Example', 'tasks' => [
+      [ 'gid' => '1', 'name' => 'PROJECT DISCUSSIONS', 'custom_fields' => [] ],
+      [ 'gid' => '2', 'name' => 'WEB PROJECT SCOPE', 'custom_fields' => [
+          [ 'name' => 'Customer First Name', 'display_value' => 'Charlie' ], [ 'name' => 'Customer Last Name', 'display_value' => 'Example' ],
+          [ 'name' => 'CONTACT EMAIL', 'display_value' => 'charlie@example.com' ], [ 'name' => 'DEV SITE PASSWORD', 'display_value' => 'secret-pass' ] ] ] ] ],
+  '666' => [ 'name' => 'Other Club - Dana Sample', 'tasks' => [] ],
+];
+$c = DFY_LH_Asana::customer( 'https://app.asana.com/1/1/project/555/board/9' );
+ok( $c['name'] === 'Charlie Example' && $c['email'] === 'charlie@example.com' && $c['project'] === 'Demo.Com - Charlie Example', 'name + email read from the project' );
+ok( strpos( json_encode( $c ), 'secret-pass' ) === false, 'other Asana fields (passwords) are not read' );
+$c2 = DFY_LH_Asana::customer( 'https://app.asana.com/0/666/1' );
+ok( $c2['name'] === 'Dana Sample' && $c2['email'] === '', 'no fields -> name taken from the project name' );
+ok( is_wp_error( DFY_LH_Asana::customer( 'https://app.pipefy.com/open-cards/1' ) ), 'Pipefy links are skipped' );
+$id21 = DFY_LH_Store::create( [ 'label' => 'asana-site.example.com', 'site_url' => 'https://asana-site.example.com', 'asana_project' => '' ] );
+$f = site( $id21 )['flags']; $f['asana_url'] = 'https://app.asana.com/1/1/project/555/list/1'; DFY_LH_Store::update( $id21, [ 'flags' => $f ] );
+DFY_LH_Admin::fill_from_asana( $id21 );
+$s21 = site( $id21 );
+ok( $s21['flags']['client'] === 'Charlie Example' && $s21['flags']['email'] === 'charlie@example.com' && $s21['label'] === 'Demo.Com', 'site filled: customer, email, project name' );
+[ $sites ] = DFY_LH_Admin::query( [ 'status' => 'ended' ] );
+ok( $sites && ! array_filter( $sites, function ( $x ) { return ! ( $x['status'] === 'removed' || DFY_LH_Engine::is_expired( $x ) ); } ), 'filter "Ended / expired": ' . count( $sites ) . ' sites, all ended' );
+[ $act ] = DFY_LH_Admin::query( [ 's' => 'charlie@example.com' ] );
+ok( count( $act ) === 1, 'search finds the site by customer email' );
+$csv = DFY_LH_Admin::csv( [ [ 'Name', 'Email' ], [ 'Charlie "C" Example', 'charlie@example.com' ], [ '=HYPERLINK("x")', '-5' ] ] );
+ok( substr( $csv, 0, 3 ) === "\xEF\xBB\xBF" && strpos( $csv, '"Charlie ""C"" Example","charlie@example.com"' ) !== false && strpos( $csv, "\"'=HYPERLINK" ) !== false && strpos( $csv, '"-5"' ) !== false, 'CSV: Excel BOM, quoting, formulas neutralised, numbers kept' );
+$GLOBALS['asana_projects'] = [];
+
+echo "\n25. Dates copied from the DFY template are ignored\n";
+$tplEvidence = function () { update_option( 'elementor_install_history', [ '3.7.0' => strtotime( '2022-08-09 UTC' ) ] ); $GLOBALS['site_dates'] = [ 'tables' => [ 'wp_gf_form' ], 'gf' => '2022-08-16 00:00:00', 'users' => '2022-09-07 00:00:00' ]; };
+reset_client( 'https://tpl-a.example.com' ); $tplEvidence();
+$a = DFY_LH_Store::create( [ 'label' => 'Tpl A', 'site_url' => 'https://tpl-a.example.com', 'asana_project' => '' ] ); DFY_LH_Rest::new_token( $a );
+$f = site( $a )['flags']; $f['detect_start'] = 1; DFY_LH_Store::update( $a, [ 'flags' => $f ] ); DFY_LH_Rest::ping( $a );
+reset_client( 'https://tpl-b.example.com' ); $tplEvidence(); $GLOBALS['site_dates']['tables'][] = 'wp_automatorwp_automations'; $GLOBALS['site_dates']['awp'] = '2026-03-04 00:00:00';
+$b = DFY_LH_Store::create( [ 'label' => 'Tpl B', 'site_url' => 'https://tpl-b.example.com', 'asana_project' => '' ] ); DFY_LH_Rest::new_token( $b );
+$f = site( $b )['flags']; $f['detect_start'] = 1; DFY_LH_Store::update( $b, [ 'flags' => $f ] ); DFY_LH_Rest::ping( $b );
+ok( substr( site( $b )['start_at'], 0, 10 ) === '2026-03-04', 'template dates (same as another site) skipped; first date of its own used: ' . substr( site( $b )['start_at'], 0, 10 ) );
+reset_client( 'https://tpl-c.example.com' ); $tplEvidence();
+$c3 = DFY_LH_Store::create( [ 'label' => 'Tpl C', 'site_url' => 'https://tpl-c.example.com', 'asana_project' => '' ] ); DFY_LH_Rest::new_token( $c3 );
+$f = site( $c3 )['flags']; $f['detect_start'] = 1; DFY_LH_Store::update( $c3, [ 'flags' => $f ] ); DFY_LH_Rest::ping( $c3 );
+ok( site( $c3 )['start_source'] === 'connected' && ! DFY_LH_Engine::is_expired( site( $c3 ) ) && DFY_LH_Engine::keeps( site( $c3 ) ), 'only template dates -> no guess, starts today, licenses kept' );
 $GLOBALS['site_dates'] = [];
 
 echo "\n$pass passed, $fail failed\n";
