@@ -15,6 +15,8 @@
  *  - Automator Pro:  src/core/admin/licensing/licensing.php  licensing_call('deactivate-license')
  *  - AutomatorWP Pro: automatorwp/libraries/cmb2-field-edd-license  api_request(..., 'deactivate_license')
  *  - WP All Import Pro: controllers/admin/settings.php  EDD at update.wpallimport.com/check_license, item 'WP All Import'
+ *  - Restrict Content Pro (3.5.x): SolidWP/iThemes updater lib/updater/server.php  package-deactivate at api.ithemes.com,
+ *    signed with a site-bound auth token made from the SolidWP username + password (never a bare key).
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
@@ -30,7 +32,10 @@ class DFY_License_Remote {
         'automatorwp-pro'       => 'AutomatorWP Pro',
         'uncanny-automator-pro' => 'Uncanny Automator Pro',
         'wp-all-import-pro'     => 'WP All Import Pro',
+        'restrict-content-pro'  => 'Restrict Content Pro (SolidWP)',
     ];
+
+    const SOLID_API = 'https://api.ithemes.com/updater/';
 
     const WPAI_API = 'https://update.wpallimport.com/check_license';
 
@@ -38,7 +43,7 @@ class DFY_License_Remote {
     const VENDOR_SITES = [
         'elementor-pro' => 'https://elementor.com/pro/', 'gravityforms' => 'https://www.gravityforms.com/', 'learndash' => 'https://www.learndash.com/',
         'wp-fusion' => 'https://wpfusion.com/', 'automatorwp-pro' => 'https://automatorwp.com/', 'wp-all-import-pro' => 'https://www.wpallimport.com/',
-        'uncanny-automator-pro' => 'https://automatorplugin.com/',
+        'uncanny-automator-pro' => 'https://automatorplugin.com/', 'restrict-content-pro' => 'https://solidwp.com/',
     ];
 
     public static function label( string $slug ): string {
@@ -55,7 +60,7 @@ class DFY_License_Remote {
     public static function remove( string $slug, array $lic, array $site, array $meta = [] ): array {
         $key  = trim( (string) ( $lic['key'] ?? '' ) );
         $home = (string) ( $site['home_url'] ?? '' );
-        if ( $slug !== 'gravityforms' && ( $key === '' || $home === '' ) ) {
+        if ( ! in_array( $slug, [ 'gravityforms', 'restrict-content-pro' ], true ) && ( $key === '' || $home === '' ) ) {
             return self::r( false, 'Missing license key or site URL.' );
         }
         switch ( $slug ) {
@@ -66,6 +71,7 @@ class DFY_License_Remote {
             case 'uncanny-automator-pro': return self::automator( $key, $home, $meta );
             case 'automatorwp-pro':       return self::automatorwp( $key, $home, $meta );
             case 'wp-all-import-pro':     return self::edd( self::WPAI_API, 'WP All Import', $key, $home, 'GET' );
+            case 'restrict-content-pro':  return self::solid( 'package-deactivate', (string) ( $lic['email'] ?? '' ), $key, (string) ( $lic['token'] ?? '' ), $meta );
         }
         return self::r( false, "Unknown vendor '{$slug}'." );
     }
@@ -133,6 +139,59 @@ class DFY_License_Remote {
         }
         // Older Automator Pro versions: plain EDD Software Licensing.
         return self::edd( 'https://automatorplugin.com/', 'Uncanny Automator Pro', $key, $home, 'POST' );
+    }
+
+    /**
+     * SolidWP (iThemes) updater auth token for one site, exactly as Ithemes_Updater_Server::get_password_hash()
+     * builds it: phpass( pbkdf2(password) . username . site URL . WordPress version ). It only works for that
+     * site URL + WordPress version, so the SolidWP password itself never leaves the hub.
+     */
+    public static function solid_token( string $user, string $pass, string $site, string $wp ): string {
+        if ( $user === '' || $pass === '' || $site === '' || $wp === '' ) return '';
+        if ( ! class_exists( 'PasswordHash' ) && defined( 'ABSPATH' ) && defined( 'WPINC' ) && file_exists( ABSPATH . WPINC . '/class-phpass.php' ) ) require_once ABSPATH . WPINC . '/class-phpass.php';
+        if ( ! class_exists( 'PasswordHash' ) ) return '';
+        $hash   = hash_pbkdf2( 'sha256', $pass, strtolower( trim( $user ) ) . 'wdHVwU&HcYcWnllo%kTUUnxpScy4%ICM29', 131072, 64 );
+        $salted = substr( $hash . $user . $site . $wp, 0, max( strlen( $hash ), 512 ) );
+        return ( new \PasswordHash( 8, true ) )->HashPassword( $salted );
+    }
+
+    /** The SolidWP updater's site URL: http, no trailing slash. */
+    public static function solid_site( string $url ): string {
+        return preg_replace( '|/$|', '', preg_replace( '/^https/', 'http', $url ) );
+    }
+
+    /**
+     * Same request as Ithemes_Updater_Server::request() for package-activate / package-deactivate.
+     * $pass is the SolidWP password (hub) — or pass a ready $token (made for this site by the hub).
+     */
+    public static function solid( string $action, string $user, string $pass, string $token, array $meta ): array {
+        $site = (string) ( $meta['solid_site'] ?? '' );
+        $wp   = (string) ( $meta['wp_version'] ?? '' );
+        $pkg  = (string) ( $meta['solid_package'] ?? '' );
+        if ( $user === '' || $site === '' || $wp === '' || $pkg === '' ) return self::r( false, 'The site never reported its SolidWP licensing details, so Restrict Content Pro must be removed in the SolidWP account (Licenses).' );
+        if ( $token === '' ) $token = self::solid_token( $user, $pass, $site, $wp );
+        if ( $token === '' ) return self::r( false, 'SolidWP username or password missing on the Licenses tab.' );
+        $query = [ 'user' => $user, 'wp' => $wp, 'site' => $site, 'timestamp' => time(), 'auth_version' => '2' ];
+        $pk    = [ $pkg => array_filter( [ 'ver' => (string) ( $meta['rcp_version'] ?? '' ), 'key' => (string) ( $meta['solid_key'] ?? '' ), 'active' => 1 ], function ( $v ) { return $v !== ''; } ) ];
+        $res   = wp_remote_post( self::SOLID_API . $action . '/?' . http_build_query( $query, '', '&' ), [
+            'timeout' => 20,
+            'body'    => [ 'request' => wp_json_encode( [ 'auth_token' => $token, 'packages' => $pk, 'iterations' => 8 ] ) ],
+        ] );
+        return self::solid_result( $action, $pkg, $res );
+    }
+
+    /** Read a SolidWP updater answer for one package. @return array{ok:bool,msg:string,key?:string} */
+    public static function solid_result( string $action, string $pkg, $res ): array {
+        if ( is_wp_error( $res ) ) return self::r( false, 'SolidWP: ' . $res->get_error_message() );
+        $body = is_array( $res ) && isset( $res['packages'] ) ? $res : json_decode( (string) wp_remote_retrieve_body( $res ), true );
+        if ( ! is_array( $body ) ) return self::r( false, 'SolidWP did not answer.' );
+        if ( ! empty( $body['error'] ) ) return self::r( false, 'SolidWP: ' . (string) ( $body['error']['message'] ?? 'error' ) );
+        $p = (array) ( $body['packages'][ $pkg ] ?? [] );
+        if ( ! empty( $p['error']['message'] ) ) return self::r( false, 'SolidWP: ' . (string) $p['error']['message'] );
+        if ( $action === 'package-activate' ) {
+            return ! empty( $p['key'] ) ? [ 'ok' => true, 'msg' => 'Activated.', 'key' => (string) $p['key'] ] : self::r( false, 'SolidWP did not license the site (' . ( $p['status'] ?? 'no key returned' ) . ').' );
+        }
+        return ( $p['status'] ?? '' ) === 'inactive' || ( $p && empty( $p['key'] ) ) ? self::r( true, 'Site removed from the SolidWP license.' ) : self::r( false, 'SolidWP answered: ' . substr( wp_json_encode( $p ), 0, 200 ) );
     }
 
     /** AutomatorWP add-ons: EDD Software Licensing at automatorwp.com, item id/name as registered by the add-on. */

@@ -145,9 +145,12 @@ class DFY_LH_Rest {
         $installed = array_values( array_intersect( (array) ( $b['installed'] ?? [] ), array_keys( DFY_License_Remote::VENDORS ) ) );
         $licenses  = [];
         $plugins   = $site['plugins'];
+        $smeta     = self::meta( $b['meta'] ?? [], [] );
         foreach ( DFY_LH_Store::licenses() as $slug => $l ) {
             if ( $l['key'] === '' || $over || in_array( $slug, self::CONNECT_ONLY, true ) ) continue;
             if ( in_array( $slug, $installed, true ) ) {
+                $l = self::outgoing( $slug, $l, $smeta );
+                if ( $l === null ) { $plugins[ $slug ] = [ 'state' => 'unlicensed', 'msg' => self::RCP_MSG, 'at' => current_time( 'mysql', true ) ]; continue; }
                 $licenses[ $slug ] = $l;
                 $plugins[ $slug ]  = [ 'state' => 'sent', 'msg' => 'Key sent to the site.', 'at' => current_time( 'mysql', true ) ];
             } elseif ( ! isset( $plugins[ $slug ] ) ) {
@@ -164,7 +167,7 @@ class DFY_LH_Rest {
             'urls'       => $urls,
             'plugins'    => $plugins,
             'last_seen'  => current_time( 'mysql', true ),
-            'meta_enc'   => DFY_Crypto::enc_json( self::meta( $b['meta'] ?? [], [] ) ),
+            'meta_enc'   => DFY_Crypto::enc_json( $smeta ),
         ] );
         $host_entered = strtolower( (string) wp_parse_url( $site['site_url'], PHP_URL_HOST ) );
         $host_seen    = strtolower( (string) wp_parse_url( $urls['home_url'], PHP_URL_HOST ) );
@@ -208,9 +211,11 @@ class DFY_LH_Rest {
                 // 'removed' here means the licenses were activated again in the hub ("Activate licenses").
                 if ( in_array( $slug, self::CONNECT_ONLY, true ) ) { if ( in_array( $st, [ '', 'not_installed', 'removed' ], true ) ) $plugins[ $slug ] = [ 'state' => 'unlicensed', 'msg' => self::EL_MSG, 'at' => current_time( 'mysql', true ) ]; continue; }
                 if ( ! $retry && ! in_array( $st, [ '', 'not_installed', 'unlicensed', 'removed' ], true ) ) continue;
-                $key = (string) ( $mine[ $slug ] ?? '' ) !== '' && $slug !== 'gravityforms' ? (string) $mine[ $slug ] : (string) ( $all[ $slug ]['key'] ?? '' );
+                $key = (string) ( $mine[ $slug ] ?? '' ) !== '' && ! in_array( $slug, [ 'gravityforms', 'restrict-content-pro' ], true ) ? (string) $mine[ $slug ] : (string) ( $all[ $slug ]['key'] ?? '' );
                 if ( $key === '' ) continue;
-                $licenses[ $slug ] = [ 'key' => $key, 'email' => (string) ( $all[ $slug ]['email'] ?? '' ) ];
+                $out = self::outgoing( $slug, [ 'key' => $key, 'email' => (string) ( $all[ $slug ]['email'] ?? '' ) ], self::meta( $b['meta'] ?? [], DFY_LH_Store::meta( $site ) ) );
+                if ( $out === null ) { if ( $st !== 'unlicensed' ) $plugins[ $slug ] = [ 'state' => 'unlicensed', 'msg' => self::RCP_MSG, 'at' => current_time( 'mysql', true ) ]; continue; }
+                $licenses[ $slug ] = $out;
                 $plugins[ $slug ]  = [ 'state' => 'sent', 'msg' => 'Key sent to the site.', 'at' => current_time( 'mysql', true ) ];
             }
             if ( $licenses ) DFY_LH_Store::log( $site['id'], 'Keys sent: ' . DFY_LH_Engine::names( array_keys( $licenses ) ) . '.' );
@@ -353,9 +358,22 @@ class DFY_LH_Rest {
         return $o;
     }
 
+    const RCP_MSG = 'Restrict Content Pro is active but has no SolidWP licensing (version 3.3 or older, whose restrictcontentpro.com licensing no longer exists). Update Restrict Content Pro to 3.5 or later; it is then licensed at the next check-in.';
+
+    /**
+     * What a site receives for one plugin. Restrict Content Pro gets a SolidWP auth token made for
+     * that site only (its URL + WordPress version) instead of the SolidWP password.
+     * @return array|null null = cannot license it on this site
+     */
+    private static function outgoing( string $slug, array $l, array $meta ): ?array {
+        if ( $slug !== 'restrict-content-pro' ) return $l;
+        $token = DFY_License_Remote::solid_token( (string) $l['email'], (string) $l['key'], (string) ( $meta['solid_site'] ?? '' ), (string) ( $meta['wp_version'] ?? '' ) );
+        return $token === '' || empty( $meta['solid_package'] ) ? null : [ 'key' => $token, 'email' => (string) $l['email'] ];
+    }
+
     /** Vendor details the hub needs to remove licenses without the site. */
     private static function meta( $in, array $old ): array {
-        $allowed = [ 'gf_site_key', 'gf_site_secret', 'automator_url', 'automator_item_id', 'elementor_version', 'learndash_version', 'site_lang', 'awp_server', 'awp_item_id', 'awp_item_name' ];
+        $allowed = [ 'gf_site_key', 'gf_site_secret', 'automator_url', 'automator_item_id', 'elementor_version', 'learndash_version', 'site_lang', 'awp_server', 'awp_item_id', 'awp_item_name', 'rcp_version', 'solid_package', 'solid_site', 'solid_key', 'wp_version' ];
         foreach ( (array) $in as $k => $v ) {
             if ( in_array( $k, $allowed, true ) && is_scalar( $v ) && (string) $v !== '' ) $old[ $k ] = sanitize_text_field( (string) $v );
         }

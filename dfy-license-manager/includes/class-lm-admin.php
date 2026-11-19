@@ -99,7 +99,7 @@ class DFY_LM_Admin {
         foreach ( DFY_LM_Vendors::installed() as $slug ) {
             if ( isset( $c['plugins'][ $slug ] ) ) continue;
             $lic = DFY_LM_Vendors::is_licensed( $slug );
-            printf( '<tr><td>%s</td><td>%s</td><td><small>%s</small></td></tr>', esc_html( DFY_License_Remote::label( $slug ) ), 'Not managed', esc_html( $lic ? 'Licensed, but not by DFY License Manager.' : 'No license yet. It is activated at the next check-in once DFY has a key for it.' ) );
+            printf( '<tr><td>%s</td><td>%s</td><td><small>%s</small></td></tr>', esc_html( DFY_License_Remote::label( $slug ) ), 'Not managed', esc_html( $lic ? 'Licensed, but not by DFY License Manager.' : ( $slug === 'restrict-content-pro' && DFY_LM_Vendors::solid_package() === '' ? 'This Restrict Content Pro version (' . ( defined( 'RCP_PLUGIN_VERSION' ) ? RCP_PLUGIN_VERSION : 'old' ) . ') has no SolidWP licensing. Update it to 3.5 or later; it is then licensed at the next check-in.' : 'No license yet. It is activated at the next check-in once DFY has a key for it.' ) ) );
         }
         if ( ! $c['plugins'] && ! DFY_LM_Vendors::installed() ) echo '<tr><td colspan="3">No DFY premium plugins are active yet. Activate them, then click "Check in now".</td></tr>';
         echo '</tbody></table>';

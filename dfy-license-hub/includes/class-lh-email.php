@@ -13,15 +13,19 @@ class DFY_LH_Email {
     const MUTED  = '#6B7280';
 
     /**
-     * @param array{name:string,site_url:string,end_date:string,left:int,plugins:array<int,array{label:string,url:string}>,contact:string,test_note:string} $d
+     * @param array{name:string,site_url:string,site_name?:string,end_date:string,left:int,plugins:array<int,array{label:string,url:string}>,contact:string,test_note:string} $d
      * @return array{subject:string,html:string,text:string}
      */
     public static function reminder( array $d ): array {
-        $subject = 'Your premium plugin licenses end on ' . $d['end_date'];
+        $d['site_name'] = (string) ( $d['site_name'] ?? '' );
+        $where   = self::domain( $d['site_url'] ) ?: $d['site_name'];
+        $subject = 'Your premium plugin licenses' . ( $where !== '' ? ' for ' . $where : '' ) . ' end on ' . $d['end_date'];
         return [ 'subject' => $subject, 'html' => self::html( $d ), 'text' => self::text( $d ) ];
     }
 
     private static function e( string $s ): string { return esc_html( $s ); }
+
+    private static function domain( string $url ): string { return $url === '' ? '' : (string) preg_replace( '~^https?://~', '', rtrim( $url, '/' ) ); }
 
     private static function html( array $d ): string {
         $a = self::ACCENT; $dark = self::DARK; $muted = self::MUTED;
@@ -44,8 +48,11 @@ class DFY_LH_Email {
             ? '<tr><td style="padding:12px 24px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;font:600 13px/1.5 ' . $font . ';color:#92400E;">' . self::e( $d['test_note'] ) . '</td></tr><tr><td style="height:16px;line-height:16px;">&nbsp;</td></tr>'
             : '';
 
-        $site = $d['site_url'] !== ''
-            ? '<div style="margin-top:6px;font:400 13px/1.5 ' . $font . ';color:' . $muted . ';">for <a href="' . esc_url( $d['site_url'] ) . '" style="color:' . $muted . ';">' . self::e( preg_replace( '~^https?://~', '', rtrim( $d['site_url'], '/' ) ) ) . '</a></div>'
+        $dom  = self::domain( $d['site_url'] );
+        $site = ( $dom !== '' || $d['site_name'] !== '' )
+            ? '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;border-top:1px solid #EEF0F3;width:100%;"><tr><td style="padding-top:12px;font:600 12px/1 ' . $font . ';color:' . $muted . ';text-transform:uppercase;letter-spacing:1px;">' . ( $dom !== '' ? 'Website' : 'Project' ) . '</td></tr><tr><td style="padding-top:6px;font:700 16px/1.4 ' . $font . ';color:' . $dark . ';">'
+              . ( $dom !== '' ? '<a href="' . esc_url( $d['site_url'] ) . '" style="color:' . $dark . ';text-decoration:underline;text-decoration-color:#D6D9DD;">' . self::e( $dom ) . '</a>' . ( $d['site_name'] !== '' && strcasecmp( $d['site_name'], $dom ) !== 0 ? '<span style="font-weight:400;color:' . $muted . ';"> · ' . self::e( $d['site_name'] ) . '</span>' : '' ) : self::e( $d['site_name'] ) )
+              . '</td></tr></table>'
             : '';
 
         $cta = $d['contact'] !== '' ? '
@@ -83,7 +90,7 @@ class DFY_LH_Email {
           <tr><td style="padding:40px 40px 0;" class="px">
             <div style="font:400 16px/1.6 ' . $font . ';color:#374151;">' . $hi . '</div>
             <h1 class="h1" style="margin:12px 0 0;font:800 28px/1.25 ' . $font . ';color:' . $dark . ';">Your premium plugin licenses are ending soon</h1>
-            <p style="margin:14px 0 0;font:400 16px/1.65 ' . $font . ';color:#374151;">The premium plugin licenses included with your BuddyBoss Done-For-You project end soon. Your plugins will <strong>keep working</strong>, but after that date they will no longer receive <strong>updates, security fixes or support</strong>.</p>
+            <p style="margin:14px 0 0;font:400 16px/1.65 ' . $font . ';color:#374151;">The premium plugin licenses included with your BuddyBoss Done-For-You project' . ( $dom !== '' ? ' for <a href="' . esc_url( $d['site_url'] ) . '" style="color:' . $dark . ';font-weight:600;">' . self::e( $dom ) . '</a>' : ( $d['site_name'] !== '' ? ' <strong>' . self::e( $d['site_name'] ) . '</strong>' : '' ) ) . ' end soon. Your plugins will <strong>keep working</strong>, but after that date they will no longer receive <strong>updates, security fixes or support</strong>.</p>
           </td></tr>
           <tr><td style="padding:28px 40px 0;" class="px">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #E5E7EB;border-left:5px solid ' . $a . ';border-radius:10px;">
@@ -105,7 +112,7 @@ class DFY_LH_Email {
           </td></tr>
         </table>
       </td></tr>
-      <tr><td align="center" style="padding:20px 24px;font:400 12px/1.6 ' . $font . ';color:#9CA3AF;">You are receiving this because BuddyBoss built ' . ( $d['site_url'] !== '' ? self::e( preg_replace( '~^https?://~', '', rtrim( $d['site_url'], '/' ) ) ) : 'your site' ) . ' as a Done-For-You project, which included these licenses for one year.</td></tr>
+      <tr><td align="center" style="padding:20px 24px;font:400 12px/1.6 ' . $font . ';color:#9CA3AF;">You are receiving this because BuddyBoss built ' . ( $dom !== '' ? self::e( $dom ) : ( $d['site_name'] !== '' ? self::e( $d['site_name'] ) : 'your site' ) ) . ' as a Done-For-You project, which included these licenses for one year.</td></tr>
     </table>
   </td></tr>
 </table>
@@ -116,8 +123,9 @@ class DFY_LH_Email {
         $lines = array_map( function ( $p ) { return '- ' . $p['label'] . ': ' . $p['url']; }, $d['plugins'] );
         return ( $d['test_note'] !== '' ? $d['test_note'] . "\n\n" : '' )
             . ( $d['name'] !== '' ? "Hi {$d['name']},\n\n" : "Hi there,\n\n" )
-            . 'The premium plugin licenses included with your BuddyBoss Done-For-You project' . ( $d['site_url'] !== '' ? " ({$d['site_url']})" : '' )
+            . 'The premium plugin licenses included with your BuddyBoss Done-For-You project' . ( $d['site_url'] !== '' ? ' for ' . self::domain( $d['site_url'] ) : ( ( $d['site_name'] ?? '' ) !== '' ? ' ' . $d['site_name'] : '' ) )
             . ' end on ' . $d['end_date'] . ( $d['left'] > 0 ? " — in {$d['left']} days" : '' ) . ".\n\n"
+            . ( $d['site_url'] !== '' ? "Website: {$d['site_url']}\n\n" : '' )
             . "Your plugins keep working, but after that date they no longer receive updates, security fixes or support.\n\n"
             . "To keep them updated, purchase your own license from each plugin author and enter it in the plugin's settings:\n\n" . implode( "\n", $lines ) . "\n\n"
             . ( $d['contact'] !== '' ? "Not sure which option is right for you? Book a short call with the BuddyBoss team:\n{$d['contact']}\n\n" : '' )

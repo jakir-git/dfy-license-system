@@ -2,7 +2,7 @@
 /**
  * Plugin Name: DFY License Hub
  * Description: Central control for BuddyBoss DFY premium licenses. Starts each site's 1-year period when it connects, tells the DFY License Manager on the client site when to remove licenses, and removes them directly from the vendors if the site stops reporting.
- * Version:     1.13.0
+ * Version:     1.15.0
  * Author:      BuddyBoss DFY
  * Requires PHP: 7.4
  * Requires at least: 6.0
@@ -10,7 +10,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'DFY_LH_VERSION', '1.13.0' );
+define( 'DFY_LH_VERSION', '1.15.0' );
 define( 'DFY_LH_FILE', __FILE__ );
 define( 'DFY_LH_DIR', __DIR__ );
 

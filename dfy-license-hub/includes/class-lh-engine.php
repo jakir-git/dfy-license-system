@@ -150,7 +150,7 @@ class DFY_LH_Engine {
                 continue;
             }
             // Prefer the key the site itself reported (licenses already on the site when it connected).
-            $use = ! empty( $meta['keys'][ $slug ] ) ? [ 'key' => (string) $meta['keys'][ $slug ], 'email' => (string) ( $lic[ $slug ]['email'] ?? '' ) ] : ( $lic[ $slug ] ?? [] );
+            $use = ! empty( $meta['keys'][ $slug ] ) && $slug !== 'restrict-content-pro' ? [ 'key' => (string) $meta['keys'][ $slug ], 'email' => (string) ( $lic[ $slug ]['email'] ?? '' ) ] : ( $lic[ $slug ] ?? [] );
             $results[ $slug ] = DFY_License_Remote::remove( $slug, $use, $site['urls'], $meta );
         }
         self::apply_results( $site, $results, "hub removed licenses because {$reason}" );
@@ -256,6 +256,7 @@ class DFY_LH_Engine {
         $mail = DFY_LH_Email::reminder( [
             'name'      => trim( (string) ( $site['flags']['client'] ?? '' ) ),
             'site_url'  => (string) $site['site_url'],
+            'site_name' => (string) $site['label'],
             'end_date'  => self::fmt( $site['expires_at'] ),
             'left'      => $left,
             'plugins'   => array_map( function ( $s ) { return [ 'label' => DFY_License_Remote::label( $s ), 'url' => DFY_License_Remote::VENDOR_SITES[ $s ] ?? '' ]; }, $slugs ),

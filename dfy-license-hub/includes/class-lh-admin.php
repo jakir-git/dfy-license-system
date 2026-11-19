@@ -10,6 +10,11 @@ class DFY_LH_Admin {
         add_action( 'admin_menu', function () {
             add_menu_page( 'DFY Licenses', 'DFY Licenses', self::CAP, self::PAGE, [ __CLASS__, 'render' ], 'dashicons-shield', 81 );
         } );
+        add_action( 'admin_enqueue_scripts', function ( $hook ) {
+            if ( $hook !== 'toplevel_page_' . self::PAGE ) return;
+            wp_enqueue_style( 'dfy-lh-admin', plugins_url( 'assets/admin.css', DFY_LH_FILE ), [], DFY_LH_VERSION );
+        } );
+        add_filter( 'admin_body_class', function ( $c ) { return ( isset( $_GET['page'] ) && $_GET['page'] === self::PAGE ) ? $c . ' dfy-lh-page' : $c; } );
         foreach ( [ 'add_site', 'site_action', 'save_licenses', 'save_settings', 'run_now', 'import', 'export', 'asana_fill', 'cron_test' ] as $a ) {
             add_action( "admin_post_dfy_lh_{$a}", [ __CLASS__, $a ] );
         }
@@ -35,7 +40,7 @@ class DFY_LH_Admin {
         self::guard( 'dfy_lh_add_site' );
         $label = sanitize_text_field( wp_unslash( $_POST['label'] ?? '' ) );
         $url   = esc_url_raw( trim( wp_unslash( $_POST['site_url'] ?? '' ) ) );
-        if ( $url === '' || ! wp_parse_url( $url, PHP_URL_HOST ) ) self::back( [ 'tab' => 'add' ], 'Enter the client site URL.', true );
+        if ( $url === '' || ! wp_parse_url( $url, PHP_URL_HOST ) ) self::back( [ 'add' => 1 ], 'Enter the client site URL.', true );
 
         // One entry per site: same domain (with or without www / trailing slash) is the same site.
         $same = DFY_LH_Store::find_by_host( $url );
@@ -285,9 +290,14 @@ class DFY_LH_Admin {
         self::back( [ 'site' => $id ], 'Unknown action.', true );
     }
 
+    /** Plugins with a key field on the Licenses tab (Uncanny Automator Pro is no longer part of DFY). */
+    private static function license_fields(): array {
+        return array_diff_key( DFY_License_Remote::VENDORS, [ 'uncanny-automator-pro' => 1 ] );
+    }
+
     public static function save_licenses(): void {
         self::guard( 'dfy_lh_save_licenses' );
-        foreach ( DFY_License_Remote::VENDORS as $slug => $label ) {
+        foreach ( self::license_fields() as $slug => $label ) {
             $key   = trim( (string) wp_unslash( $_POST['key'][ $slug ] ?? '' ) );
             $clear = ! empty( $_POST['clear'][ $slug ] );
             DFY_LH_Store::save_license( $slug, $clear ? '' : ( $key === '' ? null : $key ), (string) wp_unslash( $_POST['email'][ $slug ] ?? '' ) );
@@ -328,32 +338,69 @@ class DFY_LH_Admin {
         if ( ! current_user_can( self::CAP ) ) return;
         $tab  = sanitize_key( $_GET['tab'] ?? 'sites' );
         $site = isset( $_GET['site'] ) ? DFY_LH_Store::get( (int) $_GET['site'] ) : null;
-        echo '<div class="wrap"><h1>DFY Licenses</h1>';
+        $last = (int) get_option( 'dfy_lh_last_run' );
+        echo '<div class="wrap dfy-lh">';
+        echo '<header class="dfy-head"><div class="dfy-head__brand"><span class="dfy-head__icon dashicons dashicons-shield-alt" aria-hidden="true"></span><div><h1>DFY Licenses</h1><p>Premium plugin licenses for BuddyBoss Done-For-You sites</p></div></div><div class="dfy-head__actions">';
+        echo '<span class="dfy-head__meta">Last daily check: ' . ( $last ? esc_html( wp_date( 'M j, H:i', $last ) ) : 'never' ) . '</span>';
+        echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
+        wp_nonce_field( 'dfy_lh_run_now' );
+        echo '<input type="hidden" name="action" value="dfy_lh_run_now"><button class="button">Run daily check now</button></form>';
+        echo '<a class="button button-primary" data-dfy-open="add" href="' . esc_url( self::url( [ 'tab' => 'add' ] ) ) . '">+ Add site</a></div></header><hr class="wp-header-end" style="display:none">';
         if ( ! empty( $_GET['dfy_msg'] ) ) echo '<div class="notice notice-success"><p>' . esc_html( wp_unslash( $_GET['dfy_msg'] ) ) . '</p></div>';
         if ( ! empty( $_GET['dfy_err'] ) ) echo '<div class="notice notice-error"><p>' . esc_html( wp_unslash( $_GET['dfy_err'] ) ) . '</p></div>';
-        if ( DFY_LH_Store::setting( 'test_mode' ) ) echo '<div class="notice notice-warning"><p><strong>Test mode is on.</strong> Expired sites are only logged; no licenses are removed automatically. Turn it off on the Settings tab when you are ready.</p></div>';
+        if ( DFY_LH_Store::setting( 'test_mode' ) ) echo '<div class="dfy-banner"><span class="dashicons dashicons-warning"></span><span><strong>Test mode is on.</strong> Expired sites are only logged; no licenses are removed automatically. Turn it off on the Settings tab when you are ready.</span></div>';
 
-        echo '<nav class="nav-tab-wrapper">';
-        foreach ( [ 'sites' => 'Sites', 'add' => 'Add site', 'licenses' => 'Licenses', 'settings' => 'Settings' ] as $k => $l ) {
-            printf( '<a class="nav-tab %s" href="%s">%s</a>', ( $tab === $k && ! $site ) ? 'nav-tab-active' : '', esc_url( self::url( [ 'tab' => $k ] ) ), esc_html( $l ) );
+        echo '<nav class="dfy-tabs">';
+        foreach ( [ 'sites' => 'Sites', 'licenses' => 'Licenses', 'settings' => 'Settings' ] as $k => $l ) {
+            printf( '<a class="%s" href="%s">%s</a>', ( $tab === $k && ! $site ) || ( $site && $k === 'sites' ) ? 'is-active' : '', esc_url( self::url( [ 'tab' => $k ] ) ), esc_html( $l ) );
         }
-        echo '</nav><div style="margin-top:16px">';
+        echo '</nav><div class="dfy-body">';
         if ( $site ) self::screen_site( $site );
         elseif ( $tab === 'add' ) self::screen_add();
         elseif ( $tab === 'licenses' ) self::screen_licenses();
         elseif ( $tab === 'settings' ) self::screen_settings();
         else self::screen_sites();
-        echo '</div></div>';
+        echo '</div>';
+        self::add_modal();
+        echo '</div>';
+    }
+
+    /**
+     * Where a site's 1-year period stands, for both connected and tracked-by-date sites:
+     * running = licenses in use, soon = ends within 30 days, expired = ended and not removed yet,
+     * done = licenses removed / deactivated, pending = not connected yet.
+     */
+    public static function phase( array $s ): string {
+        if ( $s['status'] === 'removed' || ( $s['status'] === 'reference' && ! empty( $s['flags']['manual_removed'] ) ) ) return 'done';
+        if ( $s['status'] === 'pending' ) return 'pending';
+        if ( ! $s['expires_at'] ) return 'running';
+        $left = strtotime( $s['expires_at'] . ' UTC' ) - time();
+        if ( $left <= 0 ) return 'expired';
+        return $left <= 30 * DAY_IN_SECONDS ? 'soon' : 'running';
     }
 
     private static function badge( array $s ): string {
-        $now = time();
-        if ( $s['status'] === 'removed' ) return '<span style="color:#646970">Licenses deactivated</span>';
-        if ( $s['status'] === 'reference' ) return '<span style="color:#646970">Reference only</span><br><small style="color:#646970">' . ( ! empty( $s['flags']['manual_removed'] ) ? 'licenses removed by hand' : 'no DFY License Manager' ) . '</small>';
-        if ( $s['status'] === 'pending' ) return '<span style="color:#996800">Not connected yet</span>';
-        if ( DFY_LH_Engine::is_expired( $s ) ) return '<span style="color:#d63638;font-weight:600">Expired, removal pending</span>';
-        if ( $s['last_seen'] && ( $now - strtotime( $s['last_seen'] . ' UTC' ) ) > DAY_IN_SECONDS * (int) DFY_LH_Store::setting( 'silent_alert' ) ) return '<span style="color:#d63638">Not checking in</span>';
-        return '<span style="color:#008a20">Active</span>' . ( DFY_LH_Engine::keeps( $s ) ? '<br><small style="color:#646970">older project · licenses kept</small>' : '' );
+        $pill = function ( string $kind, string $text, string $sub = '' ) { return '<span class="dfy-pill dfy-pill--' . $kind . '">' . esc_html( $text ) . '</span>' . ( $sub !== '' ? '<span class="dfy-sub">' . esc_html( $sub ) . '</span>' : '' ); };
+        $ref  = $s['status'] === 'reference';
+        $keep = DFY_LH_Engine::keeps( $s );
+        switch ( self::phase( $s ) ) {
+            case 'done':    return $pill( 'muted', $ref ? 'Licenses removed' : 'Licenses deactivated', $ref ? 'removed by hand' : '' );
+            case 'pending': return $pill( 'warn', 'Not connected yet' );
+            case 'expired': return $pill( 'bad', 'Expired', $ref ? 'remove the licenses by hand' : ( $keep ? 'older project · licenses kept' : 'removal pending' ) );
+        }
+        if ( ! $ref && $s['last_seen'] && ( time() - strtotime( $s['last_seen'] . ' UTC' ) ) > DAY_IN_SECONDS * (int) DFY_LH_Store::setting( 'silent_alert' ) ) return $pill( 'bad', 'Not checking in' );
+        $sub = $ref ? 'no DFY License Manager' : ( $keep ? 'older project · licenses kept' : '' );
+        if ( self::phase( $s ) === 'soon' ) {
+            $d = (int) ceil( ( strtotime( $s['expires_at'] . ' UTC' ) - time() ) / DAY_IN_SECONDS );
+            return $pill( 'warn', 'Expires soon', $d . ' day' . ( $d === 1 ? '' : 's' ) . ' left' . ( $ref ? ' · no DFY License Manager' : '' ) );
+        }
+        return $pill( 'ok', 'Active', $sub );
+    }
+
+    /** One plugin as a small chip; the state is shown only when it is not "active". */
+    private static function chip( string $slug, string $state ): string {
+        $kind = [ 'active' => 'ok', 'sent' => 'primary', 'removed' => 'muted', 'replaced' => 'muted', 'remove_failed' => 'bad' ][ $state ] ?? 'warn';
+        return '<span class="dfy-chip dfy-chip--' . $kind . '" title="' . esc_attr( str_replace( '_', ' ', $state ) ) . '">' . esc_html( DFY_License_Remote::label( $slug ) ) . ( $state !== 'active' ? ' <em>' . esc_html( str_replace( '_', ' ', $state ) ) . '</em>' : '' ) . '</span>';
     }
 
     /** Sites matching the list filters (search, status, month/year), sorted. Used by the list and the export. */
@@ -363,7 +410,7 @@ class DFY_LH_Admin {
         $field = in_array( $g['by'] ?? '', [ 'start', 'expires', 'added' ], true ) ? $g['by'] : 'start';
         $month = max( 0, min( 12, (int) ( $g['m'] ?? 0 ) ) );
         $year  = (int) ( $g['y'] ?? 0 );
-        $st    = in_array( $g['status'] ?? '', [ 'active', 'pending', 'removed', 'expiring', 'reference', 'action', 'ended' ], true ) ? $g['status'] : '';
+        $st    = in_array( $g['status'] ?? '', [ 'active', 'pending', 'removed', 'expiring', 'expired', 'reference', 'action', 'ended', 'done' ], true ) ? $g['status'] : '';
         $sort  = in_array( $g['orderby'] ?? '', [ 'label', 'start', 'expires', 'last_seen', 'added' ], true ) ? $g['orderby'] : 'start';
         $dir   = ( $g['order'] ?? 'desc' ) === 'asc' ? 'asc' : 'desc';
         $col   = [ 'start' => 'start_at', 'expires' => 'expires_at', 'added' => 'created_at', 'last_seen' => 'last_seen', 'label' => 'label' ];
@@ -374,10 +421,14 @@ class DFY_LH_Admin {
 
         $sites = array_values( array_filter( $all, function ( $x ) use ( $q, $field, $month, $year, $st, $col ) {
             if ( $q !== '' && stripos( $x['label'] . ' ' . $x['site_url'] . ' ' . ( $x['flags']['asana_url'] ?? '' ) . ' ' . ( $x['flags']['client'] ?? '' ) . ' ' . ( $x['flags']['email'] ?? '' ), $q ) === false ) return false;
-            if ( $st === 'expiring' && ! ( in_array( $x['status'], [ 'active', 'reference' ], true ) && $x['expires_at'] && strtotime( $x['expires_at'] . ' UTC' ) < time() + 30 * DAY_IN_SECONDS ) ) return false;
+            $ph = self::phase( $x );
+            if ( $st === 'active' && ! ( $ph === 'running' && in_array( $x['status'], [ 'active', 'reference' ], true ) ) ) return false;
+            if ( $st === 'expiring' && $ph !== 'soon' ) return false;
+            if ( $st === 'expired' && $ph !== 'expired' ) return false;
+            if ( $st === 'done' && $ph !== 'done' ) return false;
             if ( $st === 'action' && ! self::urgency( $x ) ) return false;
             if ( $st === 'ended' && ! ( $x['status'] === 'removed' || DFY_LH_Engine::is_expired( $x ) ) ) return false;
-            if ( $st !== '' && ! in_array( $st, [ 'expiring', 'action', 'ended' ], true ) && $x['status'] !== $st ) return false;
+            if ( $st !== '' && ! in_array( $st, [ 'active', 'expiring', 'expired', 'action', 'ended', 'done' ], true ) && $x['status'] !== $st ) return false;
             if ( $month || $year ) {
                 $d = (string) ( $x[ $col[ $field ] ] ?? '' );
                 if ( $d === '' ) return false;
@@ -407,18 +458,35 @@ class DFY_LH_Admin {
     private static function screen_sites(): void {
         foreach ( DFY_LH_Store::all() as $x ) DFY_LH_Engine::heal_start( $x ); // connected sites always have a start date
         [ $sites, $all, $q, $field, $month, $year, $st, $sort, $dir, $years ] = self::query( $_GET );
-        $last  = (int) get_option( 'dfy_lh_last_run' );
-        echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="float:right">';
-        wp_nonce_field( 'dfy_lh_run_now' );
-        echo '<input type="hidden" name="action" value="dfy_lh_run_now"><button class="button">Run daily check now</button></form>';
-        echo '<p>Last daily check: ' . ( $last ? esc_html( wp_date( 'M j, Y H:i', $last ) ) : 'never' ) . '</p>';
-        if ( ! $all ) { echo '<p>No sites yet. Use <strong>Add site</strong> for each DFY project.</p>'; return; }
+        if ( ! $all ) {
+            echo '<div class="dfy-card dfy-empty"><h2>No sites yet</h2><p>Add each DFY project with <strong>Add site</strong>. The licenses are activated as soon as DFY License Manager connects.</p><p><a class="button button-primary" data-dfy-open="add" href="' . esc_url( self::url( [ 'tab' => 'add' ] ) ) . '">+ Add site</a></p></div>';
+            return;
+        }
+
+        // Summary tiles (each one filters the list).
+        $ph    = array_count_values( array_map( function ( $x ) { return self::phase( $x ) . ( in_array( $x['status'], [ 'active', 'reference' ], true ) ? '' : '-' . $x['status'] ); }, $all ) );
+        $count = function ( string $status ) use ( $all ) { return count( array_filter( $all, function ( $x ) use ( $status ) { return $x['status'] === $status; } ) ); };
+        $tiles = [
+            ''         => [ 'All sites', count( $all ), 'primary' ],
+            'active'   => [ 'Active', (int) ( $ph['running'] ?? 0 ), 'ok' ],
+            'expiring' => [ 'Expires soon', (int) ( $ph['soon'] ?? 0 ), 'warn' ],
+            'expired'  => [ 'Expired', (int) ( $ph['expired'] ?? 0 ), 'bad' ],
+            'pending'  => [ 'Not connected', $count( 'pending' ), 'muted' ],
+            'done'     => [ 'Licenses removed', count( array_filter( $all, function ( $x ) { return self::phase( $x ) === 'done'; } ) ), 'muted' ],
+        ];
+        echo '<div class="dfy-stats">';
+        foreach ( $tiles as $key => [ $label, $n, $kind ] ) {
+            printf( '<a class="dfy-stat dfy-stat--%s%s%s" href="%s"><span class="dfy-stat__label">%s</span><span class="dfy-stat__value">%d</span></a>',
+                esc_attr( $kind ), $st === $key ? ' is-current' : '', $n && in_array( $kind, [ 'warn', 'bad' ], true ) ? ' has-items' : '',
+                esc_url( self::url( $key === '' ? [] : [ 'status' => $key ] ) ), esc_html( $label ), $n );
+        }
+        echo '</div>';
 
         // Filter bar.
-        echo '<form method="get" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0"><input type="hidden" name="page" value="' . esc_attr( self::PAGE ) . '">';
-        echo '<input type="search" name="s" value="' . esc_attr( $q ) . '" placeholder="Search name, customer, email, URL or link" style="min-width:260px">';
+        echo '<div class="dfy-card"><div class="dfy-toolbar"><form method="get"><input type="hidden" name="page" value="' . esc_attr( self::PAGE ) . '">';
+        echo '<input type="search" class="dfy-search" name="s" value="' . esc_attr( $q ) . '" placeholder="Search name, customer, email, URL or link">';
         echo '<select name="status"><option value="">All statuses</option>';
-        foreach ( [ 'action' => 'Needs action (ending within 30 days / ended)', 'active' => 'Active', 'expiring' => 'Expiring within 30 days', 'ended' => 'Ended / expired (licenses ended or removed)', 'pending' => 'Not connected yet', 'removed' => 'Licenses deactivated', 'reference' => 'Reference only (completed, no plugin)' ] as $k => $l ) printf( '<option value="%s"%s>%s</option>', esc_attr( $k ), selected( $st, $k, false ), esc_html( $l ) );
+        foreach ( [ 'action' => 'Needs action (expires soon / expired)', 'active' => 'Active', 'expiring' => 'Expires soon (within 30 days)', 'expired' => 'Expired', 'ended' => 'Ended / expired (licenses ended or removed)', 'pending' => 'Not connected yet', 'removed' => 'Licenses deactivated', 'reference' => 'Without DFY License Manager' ] as $k => $l ) printf( '<option value="%s"%s>%s</option>', esc_attr( $k ), selected( $st, $k, false ), esc_html( $l ) );
         echo '</select><select name="by">';
         foreach ( [ 'start' => 'Start date', 'expires' => 'Expiry date', 'added' => 'Date added' ] as $k => $l ) printf( '<option value="%s"%s>%s</option>', esc_attr( $k ), selected( $field, $k, false ), esc_html( $l ) );
         echo '</select><select name="m"><option value="0">All months</option>';
@@ -426,20 +494,20 @@ class DFY_LH_Admin {
         echo '</select><select name="y"><option value="0">All years</option>';
         foreach ( array_keys( $years ) as $y ) printf( '<option value="%d"%s>%d</option>', $y, selected( $year, $y, false ), $y );
         echo '</select><input type="hidden" name="orderby" value="' . esc_attr( $sort ) . '"><input type="hidden" name="order" value="' . esc_attr( $dir ) . '">';
-        echo '<button class="button">Filter</button>';
-        if ( $q !== '' || $month || $year || $st !== '' ) echo ' <a class="button-link" href="' . esc_url( self::url( [] ) ) . '">Clear</a>';
-        echo '<span style="margin-left:auto;color:#646970">' . count( $sites ) . ' of ' . count( $all ) . ' sites</span></form>';
+        echo '<button class="button button-primary">Filter</button>';
+        if ( $q !== '' || $month || $year || $st !== '' ) echo '<a class="button" href="' . esc_url( self::url( [] ) ) . '">Clear</a>';
+        echo '<span class="dfy-toolbar__count">' . count( $sites ) . ' of ' . count( $all ) . ' sites</span></form></div>';
         $exp = wp_nonce_url( admin_url( 'admin-post.php?' . http_build_query( array_filter( [ 'action' => 'dfy_lh_export', 's' => $q, 'by' => $field, 'm' => $month ?: null, 'y' => $year ?: null, 'status' => $st, 'orderby' => $sort, 'order' => $dir ] ) ) ), 'dfy_lh_export' );
-        echo '<p style="display:flex;gap:8px;flex-wrap:wrap"><a class="button" href="' . esc_url( $exp ) . '">Export these ' . count( $sites ) . ' sites to Excel (CSV)</a>';
+        echo '<div class="dfy-toolbar__row"><div class="dfy-legend"><span><i class="is-soon"></i>Expires soon (within 30 days)</span><span><i class="is-ended"></i>Expired — action needed</span></div><div class="dfy-actions">';
         if ( DFY_LH_Store::asana_token() !== '' ) {
             $missing = count( array_filter( $all, function ( $x ) { return DFY_LH_Asana::project_gid( (string) ( $x['flags']['asana_url'] ?? '' ) ) !== '' && empty( $x['flags']['email'] ); } ) );
             if ( $missing ) {
-                echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline">';
+                echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
                 wp_nonce_field( 'dfy_lh_asana_fill' );
                 echo '<input type="hidden" name="action" value="dfy_lh_asana_fill"><button class="button">Fill customer name and email from Asana (' . $missing . ' sites)</button></form>';
             }
         }
-        echo '</p>';
+        echo '<a class="button" href="' . esc_url( $exp ) . '">Export these ' . count( $sites ) . ' sites to Excel (CSV)</a></div></div></div>';
 
         $th = function ( string $key, string $label ) use ( $sort, $dir, $q, $field, $month, $year, $st ) {
             $next = ( $sort === $key && $dir === 'desc' ) ? 'asc' : 'desc';
@@ -447,26 +515,24 @@ class DFY_LH_Admin {
             $arrow = $sort === $key ? ( $dir === 'asc' ? ' ▲' : ' ▼' ) : '';
             return '<th><a href="' . esc_url( $url ) . '">' . esc_html( $label . $arrow ) . '</a></th>';
         };
-        echo '<style>.dfy-urgent td{background:#fcf0f1!important}.dfy-urgent td:first-child{box-shadow:inset 4px 0 0 #d63638}.dfy-red{color:#d63638;font-weight:600}.dfy-soon td{background:#fcf9e8!important}.dfy-soon td:first-child{box-shadow:inset 4px 0 0 #dba617}.dfy-soon .dfy-red{color:#996800}</style>';
-        echo '<p style="margin:4px 0 8px;color:#646970"><span style="display:inline-block;width:12px;height:12px;background:#fcf9e8;border-left:4px solid #dba617;vertical-align:middle"></span> ends within 30 days &nbsp; <span style="display:inline-block;width:12px;height:12px;background:#fcf0f1;border-left:4px solid #d63638;vertical-align:middle"></span> ended — action needed</p>';
-        echo '<table class="widefat striped"><thead><tr><th style="width:36px">#</th>' . $th( 'label', 'Site' ) . '<th>Status</th>' . $th( 'start', 'Start date' ) . $th( 'expires', 'Licenses expire' ) . $th( 'last_seen', 'Last check-in' ) . '<th>Licenses</th><th style="width:300px">Actions</th></tr></thead><tbody>';
-        if ( ! $sites ) echo '<tr><td colspan="8">No sites match.</td></tr>';
+        echo '<div class="dfy-card dfy-card--flush"><div class="dfy-table-wrap"><table class="widefat dfy-sites"><thead><tr><th>#</th>' . $th( 'label', 'Site' ) . '<th>Status</th>' . $th( 'start', 'Start date' ) . $th( 'expires', 'Licenses expire' ) . $th( 'last_seen', 'Last check-in' ) . '<th>Licenses</th><th>Actions</th></tr></thead><tbody>';
+        if ( ! $sites ) echo '<tr><td colspan="8" class="dfy-empty">No sites match.</td></tr>';
         $n = 0;
         foreach ( $sites as $s ) {
             $n++;
             $u = self::urgency( $s );
-            $lic = [];
-            foreach ( $s['plugins'] as $slug => $p ) if ( ( $p['state'] ?? '' ) !== 'not_installed' ) $lic[] = DFY_License_Remote::label( $slug ) . ' (' . str_replace( '_', ' ', $p['state'] ) . ')';
-            echo '<tr' . ( $u ? ' class="' . ( strpos( $u, 'Ends in' ) === 0 ? 'dfy-soon' : 'dfy-urgent' ) . '"' : '' ) . '><td>' . $n . '</td><td><a href="' . esc_url( self::url( [ 'site' => $s['id'] ] ) ) . '"><strong>' . esc_html( $s['label'] ) . '</strong></a><br><small>' . ( $s['site_url'] !== '' ? '<a href="' . esc_url( $s['site_url'] ) . '" target="_blank" rel="noopener">' . esc_html( $s['site_url'] ) . '</a>' : 'no site URL' ) . ( ! empty( $s['flags']['client'] ) ? '<br>' . esc_html( $s['flags']['client'] ) : '' ) . ( ! empty( $s['flags']['email'] ) ? ( empty( $s['flags']['client'] ) ? '<br>' : ' · ' ) . '<a href="mailto:' . esc_attr( $s['flags']['email'] ) . '">' . esc_html( $s['flags']['email'] ) . '</a>' : '' ) . '</small></td>';
+            $chips = '';
+            foreach ( $s['plugins'] as $slug => $p ) if ( ( $p['state'] ?? '' ) !== 'not_installed' ) $chips .= self::chip( $slug, (string) ( $p['state'] ?? '' ) );
+            echo '<tr' . ( $u ? ' class="' . ( strpos( $u, 'Ends in' ) === 0 ? 'dfy-soon' : 'dfy-urgent' ) . '"' : '' ) . '><td>' . $n . '</td><td><a href="' . esc_url( self::url( [ 'site' => $s['id'] ] ) ) . '"><strong>' . esc_html( $s['label'] ) . '</strong></a><br><small>' . ( $s['site_url'] !== '' ? '<a href="' . esc_url( $s['site_url'] ) . '" target="_blank" rel="noopener">' . esc_html( preg_replace( '~^https?://~', '', rtrim( $s['site_url'], '/' ) ) ) . '</a>' : 'no site URL' ) . ( ! empty( $s['flags']['client'] ) ? '<br>' . esc_html( $s['flags']['client'] ) : '' ) . ( ! empty( $s['flags']['email'] ) ? ( empty( $s['flags']['client'] ) ? '<br>' : ' · ' ) . '<a href="mailto:' . esc_attr( $s['flags']['email'] ) . '">' . esc_html( $s['flags']['email'] ) . '</a>' : '' ) . '</small></td>';
             echo '<td>' . self::badge( $s ) . '</td>';
-            echo '<td>' . esc_html( $s['start_at'] ? self::num_date( $s['start_at'] ) : '-' ) . ( $s['start_at'] ? '<br><small style="color:#646970">' . esc_html( [ 'manual' => 'set by hand', 'completed' => 'project completed', 'connected' => 'when connected', 'detected' => 'found on the site' ][ $s['start_source'] ] ?? $s['start_source'] ) . '</small>' : '' ) . '</td>';
-            echo '<td' . ( $u ? ' class="dfy-red"' : '' ) . '>' . esc_html( $s['expires_at'] ? self::num_date( $s['expires_at'] ) : '-' ) . ( $u ? '<br><small class="dfy-red">' . esc_html( $u ) . '</small>' : '' ) . '</td>';
+            echo '<td><span class="dfy-date">' . esc_html( $s['start_at'] ? self::num_date( $s['start_at'] ) : '-' ) . '</span>' . ( $s['start_at'] ? '<span class="dfy-date-sub">' . esc_html( [ 'manual' => 'set by hand', 'completed' => 'project completed', 'connected' => 'when connected', 'detected' => 'found on the site' ][ $s['start_source'] ] ?? $s['start_source'] ) . '</span>' : '' ) . '</td>';
+            echo '<td' . ( $u ? ' class="dfy-red"' : '' ) . '><span class="dfy-date">' . esc_html( $s['expires_at'] ? self::num_date( $s['expires_at'] ) : '-' ) . '</span>' . ( $u ? '<small class="dfy-red dfy-date-sub">' . esc_html( $u ) . '</small>' : '' ) . '</td>';
             echo '<td>' . esc_html( $s['last_seen'] ? human_time_diff( strtotime( $s['last_seen'] . ' UTC' ) ) . ' ago' : '-' ) . '</td>';
-            echo '<td><small>' . esc_html( implode( ', ', $lic ) ?: '-' ) . '</small></td><td>';
+            echo '<td>' . ( $chips !== '' ? '<div class="dfy-chips">' . $chips . '</div>' : '<span class="dfy-sub">-</span>' ) . '</td><td>';
             self::row_actions( $s );
             echo '</td></tr>';
         }
-        echo '</tbody></table>';
+        echo '</tbody></table></div></div>';
     }
 
     /**
@@ -494,11 +560,11 @@ class DFY_LH_Admin {
     private static function row_actions( array $s, bool $wide = false ): void {
         $hidden = [ 'site' => $s['id'], 'return' => $wide ? 'site' : 'list' ];
         $link   = (string) ( $s['flags']['asana_url'] ?? '' );
-        echo '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">';
+        echo '<div class="dfy-actions">';
         if ( $link !== '' ) echo '<a class="button button-small" href="' . esc_url( $link ) . '" target="_blank" rel="noopener">' . ( strpos( $link, 'pipefy' ) !== false ? 'Pipefy' : 'Asana' ) . ' ↗</a>';
         if ( in_array( $s['status'], [ 'active', 'pending', 'reference' ], true ) ) {
             self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'set_start' ] );
-            echo '<input type="date" name="start" required value="' . esc_attr( $s['start_at'] ? wp_date( 'Y-m-d', strtotime( $s['start_at'] . ' UTC' ) ) : '' ) . '" style="width:140px"> <button class="button button-small" onclick="return confirm(\'Set the start date? The licenses then expire one year (' . esc_js( (string) DFY_LH_Store::setting( 'term_days' ) ) . ' days) after it.\')">Set start date</button></form>';
+            echo '<input type="date" name="start" required value="' . esc_attr( $s['start_at'] ? wp_date( 'Y-m-d', strtotime( $s['start_at'] . ' UTC' ) ) : '' ) . '"><button class="button button-small" onclick="return confirm(\'Set the start date? The licenses then expire one year (' . esc_js( (string) DFY_LH_Store::setting( 'term_days' ) ) . ' days) after it.\')">Set start date</button></form>';
         }
         if ( $s['status'] === 'active' ) {
             self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'remove_now' ] );
@@ -539,34 +605,71 @@ class DFY_LH_Admin {
         foreach ( $hidden as $k => $v ) echo '<input type="hidden" name="' . esc_attr( $k ) . '" value="' . esc_attr( $v ) . '">';
     }
 
-    private static function screen_add(): void {
+    /** The Add site form (shown in the popup, and on ?tab=add without JavaScript). */
+    private static function add_form(): void {
         self::form_open( 'dfy_lh_add_site' );
-        echo '<table class="form-table">
-            <tr><th>Client site URL</th><td><input name="site_url" type="url" class="regular-text" required placeholder="https://example.com"><p class="description">The live site the licenses will be used on.</p></td></tr>
-            <tr><th>Project / site name</th><td><input name="label" class="regular-text" placeholder="Community or project name"></td></tr>
-            <tr><th>Customer name</th><td><input name="client" class="regular-text" placeholder="Filled from Asana when empty"></td></tr>
-            <tr><th>Customer email</th><td><input name="email" type="email" class="regular-text" placeholder="Filled from Asana when empty"></td></tr>
-            <tr><th>Asana project</th><td><input name="asana" type="url" class="large-text" placeholder="https://app.asana.com/…"><p class="description">' . ( DFY_LH_Store::asana_token() !== '' ? 'The customer name and email are filled in from this project (Customer First/Last Name and CONTACT EMAIL fields) when left empty above.' : 'For reference. Add an Asana token on the Settings tab to fill the customer name and email from it automatically.' ) . '</p></td></tr>
-            <tr><th>Older DFY project</th><td><label><input type="checkbox" name="older" value="1"> The DFY licenses were activated on this site long ago — find the start date on the site</label>
-                <p class="description">DFY License Manager reads the dates the DFY plugins left on the site (Elementor install history, first Gravity Forms form, first LearnDash course, first AutomatorWP automation, first WP All Import import). Dates copied from the DFY starter template (identical on other DFY sites) are ignored. The earliest remaining date starts the 1-year period; if none is found, it starts today. Licenses already on the site are taken over as they are and are <strong>never removed automatically</strong> for older projects — only with "Deactivate licenses".</p></td></tr>
-        </table>
-        <p class="description">If DFY License Manager is already active on the client site, the licenses are activated as soon as you click the button. Otherwise they are activated when it is installed there. The 1-year period starts at that moment.</p>';
-        submit_button( 'Add site and create connection code' );
-        echo '</form>';
+        $asana = DFY_LH_Store::asana_token() !== ''
+            ? 'The customer name and email are filled in from this project when left empty below.'
+            : 'For reference. Add an Asana token on the Settings tab to fill the customer name and email from it.';
+        echo '<div class="dfy-form">
+            <label class="dfy-field"><span>Client site URL <em>*</em></span><input name="site_url" type="url" required placeholder="https://example.com"><small>The live site the licenses will be used on.</small></label>
+            <label class="dfy-field"><span>Asana project</span><input name="asana" type="url" placeholder="https://app.asana.com/…"><small>' . esc_html( $asana ) . '</small></label>
+            <label class="dfy-field"><span>Project / site name</span><input name="label" type="text" placeholder="Community or project name"></label>
+            <div class="dfy-form__row">
+                <label class="dfy-field"><span>Customer name</span><input name="client" type="text" placeholder="Filled from Asana when empty"></label>
+                <label class="dfy-field"><span>Customer email</span><input name="email" type="email" placeholder="Filled from Asana when empty"></label>
+            </div>
+            <p class="dfy-form__note">If DFY License Manager is already active on the client site, the licenses are activated as soon as you click the button. Otherwise they are activated when it is installed there. The 1-year period starts at that moment.</p>
+        </div>
+        <div class="dfy-modal__foot"><button type="button" class="button" data-dfy-close>Cancel</button><button class="button button-primary">Add site and create connection code</button></div></form>';
+    }
 
-        echo '<hr style="margin:32px 0"><h2>Add completed sites for reference</h2>
-            <p>For older DFY projects where DFY License Manager is not installed (often no admin access). They appear in the list as <em>Reference only</em> with their start and end dates, and the team gets an email when a year ends so the licenses can be removed by hand. Duplicates (same name, link or site URL) are skipped.</p>';
+    private static function add_modal(): void {
+        echo '<dialog class="dfy-modal" id="dfy-add-site" aria-labelledby="dfy-add-title"><div class="dfy-modal__head"><div><h2 id="dfy-add-title">Add a DFY site</h2><p>The licenses are activated as soon as DFY License Manager on the site connects.</p></div><button type="button" class="dfy-modal__x" data-dfy-close aria-label="Close">&times;</button></div>';
+        self::add_form();
+        echo '</dialog>';
+        echo "<script>(function(){var d=document.getElementById('dfy-add-site');if(!d||!d.showModal)return;"
+            . "document.querySelectorAll('[data-dfy-open=add]').forEach(function(b){b.addEventListener('click',function(e){e.preventDefault();d.showModal();var i=d.querySelector('input[name=site_url]');if(i)i.focus();});});"
+            . "d.querySelectorAll('[data-dfy-close]').forEach(function(b){b.addEventListener('click',function(){d.close();});});"
+            . "d.addEventListener('click',function(e){if(e.target===d)d.close();});"
+            . "if(/[?&]add=1(&|$)/.test(location.search))d.showModal();})();</script>";
+    }
+
+    /** Fallback page for ?tab=add (no JavaScript). */
+    private static function screen_add(): void {
+        echo '<div class="dfy-card"><div class="dfy-card__head"><div><h2>Add a DFY site</h2><p class="dfy-card__desc">The licenses are activated as soon as DFY License Manager on the site connects.</p></div></div>';
+        self::add_form();
+        echo '</div>';
+    }
+
+    /** Settings tab: bulk-add completed sites that have no DFY License Manager. */
+    private static function import_card(): void {
+        echo '<div class="dfy-card"><h2>Add completed sites for reference</h2>
+            <p class="dfy-card__desc">For older DFY projects where DFY License Manager is not installed (often no admin access). They appear in the list with their start and end dates (Active, Expires soon, Expired), and the team gets an email when a year ends so the licenses can be removed by hand. Duplicates (same name, link or site URL) are skipped.</p>';
         self::form_open( 'dfy_lh_import' );
         echo '<textarea name="lines" rows="8" class="large-text code" placeholder="One per line:  Name | completion date (YYYY-MM-DD) | Asana or Pipefy link | client name | site URL&#10;Example Project | 2025-07-03 | https://app.pipefy.com/open-cards/123456 | Jane Doe |"></textarea>';
         submit_button( 'Add reference sites', 'secondary' );
-        echo '</form>';
+        echo '</form></div>';
     }
 
     private static function screen_site( array $s ): void {
         $hidden = [ 'site' => $s['id'] ];
-        echo '<h2>' . esc_html( $s['label'] ) . ' <small style="font-weight:400">' . self::badge( $s ) . '</small></h2>';
-        echo '<p><a href="' . esc_url( $s['site_url'] ) . '" target="_blank" rel="noopener">' . esc_html( $s['site_url'] ) . '</a>';
-        echo '</p>';
+        $link   = (string) ( $s['flags']['asana_url'] ?? '' );
+        $src    = [ 'manual' => 'set by hand', 'completed' => 'project completed', 'connected' => 'when the site connected', 'detected' => 'found on the site (earliest DFY plugin date)' ][ $s['start_source'] ] ?? '';
+        $u      = self::urgency( $s );
+        echo '<a class="dfy-back" href="' . esc_url( self::url( [] ) ) . '">&larr; All sites</a>';
+        echo '<div class="dfy-card"><div class="dfy-site-head"><div><h2>' . esc_html( $s['label'] ) . ' ' . self::badge( $s ) . '</h2><div class="dfy-site-head__links">';
+        if ( $s['site_url'] !== '' ) echo '<a href="' . esc_url( $s['site_url'] ) . '" target="_blank" rel="noopener">' . esc_html( $s['site_url'] ) . ' ↗</a>';
+        if ( ! empty( $s['flags']['client'] ) ) echo '<span>' . esc_html( $s['flags']['client'] ) . '</span>';
+        if ( ! empty( $s['flags']['email'] ) ) echo '<a href="mailto:' . esc_attr( $s['flags']['email'] ) . '">' . esc_html( $s['flags']['email'] ) . '</a>';
+        if ( $link !== '' ) echo '<a href="' . esc_url( $link ) . '" target="_blank" rel="noopener">' . ( strpos( $link, 'pipefy' ) !== false ? 'Pipefy' : 'Asana' ) . ' project ↗</a>';
+        echo '</div></div></div><div class="dfy-facts">';
+        $fact = function ( string $label, string $value, string $note = '' ) { echo '<div class="dfy-fact"><span class="dfy-fact__label">' . esc_html( $label ) . '</span><span class="dfy-fact__value">' . esc_html( $value ) . '</span>' . ( $note !== '' ? '<span class="dfy-fact__note">' . esc_html( $note ) . '</span>' : '' ) . '</div>'; };
+        $fact( 'Start date', $s['start_at'] ? self::num_date( $s['start_at'] ) : 'Set when the site connects', $s['start_at'] ? $src : '' );
+        $fact( 'Licenses expire', $s['expires_at'] ? self::num_date( $s['expires_at'] ) : '-', $u );
+        $fact( 'Last check-in', $s['last_seen'] ? wp_date( 'M j, Y H:i', strtotime( $s['last_seen'] . ' UTC' ) ) : '-' );
+        $fact( 'Site reports', implode( '  ·  ', array_unique( array_filter( $s['urls'] ) ) ) ?: '-' );
+        echo '</div></div>';
 
         $code = DFY_LH_Rest::connection_code( $s );
         if ( $code !== '' ) {
@@ -574,92 +677,93 @@ class DFY_LH_Admin {
                 <p><textarea readonly rows="3" class="large-text code" onclick="this.select()">' . esc_textarea( $code ) . '</textarea></p></div>';
         }
 
-        echo '<table class="widefat" style="max-width:900px"><tbody>';
-        $rows = [
-            'Start date'      => $s['start_at'] ? self::num_date( $s['start_at'] ) . ( [ 'manual' => ' — set by hand', 'completed' => ' — project completed', 'connected' => ' — when the site connected', 'detected' => ' — found on the site (earliest DFY plugin date)' ][ $s['start_source'] ] ?? '' ) : 'Set when the site connects',
-            'Licenses expire' => $s['expires_at'] ? self::num_date( $s['expires_at'] ) : '-',
-            'Last check-in'   => $s['last_seen'] ? wp_date( 'M j, Y H:i', strtotime( $s['last_seen'] . ' UTC' ) ) : '-',
-            'Site reports'    => implode( '  ·  ', array_filter( $s['urls'] ) ) ?: '-',
-        ];
-        foreach ( $rows as $k => $v ) echo '<tr><th style="width:180px">' . esc_html( $k ) . '</th><td>' . esc_html( $v ) . '</td></tr>';
-        echo '</tbody></table>';
+        echo '<div class="dfy-card"><h2>Licenses on this site</h2><p class="dfy-card__desc">Reported by DFY License Manager at each check-in.</p><table class="widefat"><thead><tr><th>Plugin</th><th>State</th><th>Details</th></tr></thead><tbody>';
+        if ( ! $s['plugins'] ) echo '<tr><td colspan="3">' . ( $s['status'] === 'pending' ? 'Not connected yet.' : ( $s['status'] === 'reference' ? 'Reference only: DFY License Manager is not installed on this site.' : 'Connected, but no DFY premium plugin is licensed on the site yet.' ) ) . '</td></tr>';
+        foreach ( $s['plugins'] as $slug => $p ) {
+            $state = (string) ( $p['state'] ?? '' );
+            $kind  = [ 'active' => 'ok', 'sent' => 'primary', 'removed' => 'muted', 'replaced' => 'muted', 'not_installed' => 'muted', 'remove_failed' => 'bad' ][ $state ] ?? 'warn';
+            printf( '<tr><td><strong>%s</strong></td><td><span class="dfy-pill dfy-pill--%s">%s</span></td><td><small>%s</small></td></tr>', esc_html( DFY_License_Remote::label( $slug ) ), $kind, esc_html( str_replace( '_', ' ', $state ) ), esc_html( $p['msg'] ?? '' ) );
+        }
+        echo '</tbody></table></div>';
+
+        echo '<div class="dfy-card"><h2>Actions</h2><p class="dfy-card__desc">Changes apply right away; the site is told at once when it can be reached.</p>';
+        self::row_actions( $s, true );
+        if ( $s['status'] === 'pending' || $s['status'] !== 'removed' ) {
+            echo '<div class="dfy-actions" style="margin-top:10px">';
+            if ( $s['status'] === 'pending' ) {
+                self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'connect_now' ] );
+                echo '<button class="button button-primary">Connect now</button></form>';
+            }
+            if ( $s['status'] !== 'removed' && $s['status'] !== 'reference' ) {
+                self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'new_code' ] );
+                echo '<button class="button">New connection code</button></form>';
+            }
+            echo '</div>';
+        }
+        echo '</div>';
 
         $ev = (array) ( $s['flags']['evidence'] ?? [] );
         if ( $ev ) {
             $tpl = DFY_LH_Rest::template_dates( (int) $s['id'] );
             $sug = DFY_LH_Rest::suggested_start( $ev, $tpl );
-            echo '<h3>Dates found on the site</h3><p class="description">WordPress and the vendor plugins do not record when a license was activated. These are the dates the DFY plugins left on the site. Dates that are identical on other DFY sites were copied from the DFY starter template and are ignored. ' . ( $sug ? 'The suggested date is the earliest one that belongs to this site.' : '<strong>No date on this site shows when the licenses were activated</strong>; check the vendor account, or set the date by hand.' ) . '</p>';
-            echo '<table class="widefat striped" style="max-width:900px"><thead><tr><th>Date</th><th>Plugin</th><th>Found</th><th></th></tr></thead><tbody>';
+            echo '<div class="dfy-card"><h2>Dates found on the site</h2><p class="dfy-card__desc">WordPress and the vendor plugins do not record when a license was activated. These are the dates the DFY plugins left on the site. Dates that are identical on other DFY sites were copied from the DFY starter template and are ignored. ' . ( $sug ? 'The suggested date is the earliest one that belongs to this site.' : '<strong>No date on this site shows when the licenses were activated</strong>; check the vendor account, or set the date by hand.' ) . '</p>';
+            echo '<table class="widefat"><thead><tr><th>Date</th><th>Plugin</th><th>Found</th><th></th></tr></thead><tbody>';
             foreach ( $ev as $e ) {
                 $is = $sug && $sug['date'] === $e['date'] && $sug['source'] === $e['source'];
                 $tp = DFY_LH_Rest::is_template( $e, $tpl );
-                echo '<tr' . ( $is ? ' style="font-weight:600"' : '' ) . '><td>' . esc_html( self::num_date( $e['date'] ) ) . '</td><td>' . esc_html( $e['label'] ) . '</td><td>' . esc_html( $e['source'] ) . ( $is ? ' <span style="color:#008a20">← suggested start</span>' : '' ) . ( $tp ? ' <span style="color:#996800">· copied from the DFY template (same on ' . (int) $tpl[ $e['source'] . '|' . substr( $e['date'], 0, 10 ) ] . ' other site' . ( $tpl[ $e['source'] . '|' . substr( $e['date'], 0, 10 ) ] > 1 ? 's' : '' ) . ')</span>' : '' ) . '</td><td>';
+                $nt = $tp ? (int) $tpl[ $e['source'] . '|' . substr( $e['date'], 0, 10 ) ] : 0;
+                echo '<tr><td><span class="dfy-date">' . esc_html( self::num_date( $e['date'] ) ) . '</span></td><td>' . esc_html( $e['label'] ) . '</td><td>' . esc_html( $e['source'] ) . ( $is ? ' <span class="dfy-tag dfy-tag--ok">← suggested start</span>' : '' ) . ( $tp ? ' <span class="dfy-tag dfy-tag--warn">copied from the DFY template (same on ' . $nt . ' other site' . ( $nt > 1 ? 's' : '' ) . ')</span>' : '' ) . '</td><td>';
                 if ( $s['status'] !== 'removed' && $e['slug'] !== 'wp-fusion' && ! $tp ) {
                     self::form_open( 'dfy_lh_site_action', [ 'site' => $s['id'], 'do' => 'set_start', 'source' => 'detected', 'start' => gmdate( 'Y-m-d', strtotime( $e['date'] . ' UTC' ) ), 'return' => 'site' ] );
                     echo '<button class="button button-small" onclick="return confirm(\'Use ' . esc_js( gmdate( 'Y-m-d', strtotime( $e['date'] . ' UTC' ) ) ) . ' as the start date? The licenses then end one year later.\')">Use this date</button></form>';
                 }
                 echo '</td></tr>';
             }
-            echo '</tbody></table>';
+            echo '</tbody></table></div>';
         }
 
-        echo '<h3>Licenses on this site</h3><table class="widefat striped" style="max-width:900px"><thead><tr><th>Plugin</th><th>State</th><th>Details</th></tr></thead><tbody>';
-        if ( ! $s['plugins'] ) echo '<tr><td colspan="3">' . ( $s['status'] === 'pending' ? 'Not connected yet.' : 'Connected, but no DFY premium plugin is licensed on the site yet.' ) . '</td></tr>';
-        foreach ( $s['plugins'] as $slug => $p ) {
-            printf( '<tr><td>%s</td><td>%s</td><td><small>%s</small></td></tr>', esc_html( DFY_License_Remote::label( $slug ) ), esc_html( str_replace( '_', ' ', $p['state'] ?? '' ) ), esc_html( $p['msg'] ?? '' ) );
-        }
-        echo '</tbody></table>';
-
-        echo '<h3>Actions</h3>';
-        self::row_actions( $s, true );
-        echo '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-top:8px">';
-        if ( $s['status'] === 'pending' ) {
-            self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'connect_now' ] );
-            echo '<p><button class="button button-primary">Connect now</button></p></form>';
-        }
-        if ( $s['status'] !== 'removed' ) {
-            self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'new_code' ] );
-            echo '<p><button class="button">New connection code</button></p></form>';
-        }
-        echo '</div>';
-
+        echo '<div class="dfy-grid-2"><div class="dfy-card"><h2>Details</h2>';
         self::form_open( 'dfy_lh_site_action', $hidden + [ 'do' => 'edit' ] );
-        echo '<h3>Details</h3><table class="form-table"><tr><th>Name</th><td><input name="label" class="regular-text" value="' . esc_attr( $s['label'] ) . '"></td></tr>' . ( $s['status'] === 'reference' ? '
+        echo '<table class="form-table"><tr><th>Name</th><td><input name="label" class="regular-text" value="' . esc_attr( $s['label'] ) . '"></td></tr>' . ( $s['status'] === 'reference' ? '
             <tr><th>Client site URL</th><td><input name="site_url" type="url" class="regular-text" value="' . esc_attr( $s['site_url'] ) . '"></td></tr>' : '' ) . '
             <tr><th>Keep licenses</th><td><label><input type="checkbox" name="keep" value="1" ' . checked( DFY_LH_Engine::keeps( $s ), true, false ) . '> Never remove this site\'s licenses automatically (older project). Only "Deactivate licenses" removes them.</label></td></tr>
             <tr><th>Customer name</th><td><input name="client" class="regular-text" value="' . esc_attr( $s['flags']['client'] ?? '' ) . '"></td></tr>
             <tr><th>Customer email</th><td><input name="email" type="email" class="regular-text" value="' . esc_attr( $s['flags']['email'] ?? '' ) . '"></td></tr>
-            <tr><th>Asana / Pipefy link</th><td><input name="asana" type="url" class="large-text" value="' . esc_attr( $s['flags']['asana_url'] ?? '' ) . '"><p class="description">Empty customer name/email are filled from the Asana project when you save (Asana token on the Settings tab).</p></td></tr></table>';
+            <tr><th>Asana / Pipefy link</th><td><input name="asana" type="url" class="regular-text" value="' . esc_attr( $link ) . '"><p class="description">Empty customer name/email are filled from the Asana project when you save (Asana token on the Settings tab).</p></td></tr></table>';
         submit_button( 'Save details', 'secondary' );
-        echo '</form>';
+        echo '</form></div>';
 
-        echo '<h3>Log</h3><div style="max-width:900px;max-height:360px;overflow:auto;background:#fff;border:1px solid #c3c4c7;padding:8px 12px">';
+        echo '<div class="dfy-card"><h2>Log</h2><p class="dfy-card__desc">Newest first.</p><div class="dfy-log">';
         foreach ( array_reverse( $s['log'] ) as $l ) {
-            echo '<p style="margin:4px 0"><code>' . esc_html( wp_date( 'Y-m-d H:i', strtotime( $l['t'] . ' UTC' ) ) ) . '</code> ' . nl2br( esc_html( $l['m'] ) ) . '</p>';
+            echo '<div class="dfy-log__item"><span class="dfy-log__time">' . esc_html( wp_date( 'Y-m-d H:i', strtotime( $l['t'] . ' UTC' ) ) ) . '</span><span>' . nl2br( esc_html( $l['m'] ) ) . '</span></div>';
         }
-        echo '</div>';
-
+        if ( ! $s['log'] ) echo '<div class="dfy-log__item">No entries yet.</div>';
+        echo '</div></div></div>';
     }
 
     private static function screen_licenses(): void {
         $lic = DFY_LH_Store::licenses();
+        echo '<div class="dfy-card"><h2>Agency license keys</h2><p class="dfy-card__desc">The keys DFY sites receive. Stored encrypted and only sent to a site when it connects. Leave a key empty to keep the saved one.</p>';
         self::form_open( 'dfy_lh_save_licenses' );
-        echo '<p>The agency license keys DFY sites receive. Keys are stored encrypted and are only sent to a site once, at connection. Leave a key empty to keep the saved one.</p>';
-        echo '<table class="widefat" style="max-width:900px"><thead><tr><th>Plugin</th><th>License key</th><th>Account email</th><th>Clear</th></tr></thead><tbody>';
-        foreach ( DFY_License_Remote::VENDORS as $slug => $label ) {
+        echo '<table class="widefat"><thead><tr><th>Plugin</th><th>License key / password</th><th>Account email / username</th><th>Clear</th></tr></thead><tbody>';
+        foreach ( self::license_fields() as $slug => $label ) {
             $has = ( $lic[ $slug ]['key'] ?? '' ) !== '';
-            printf( '<tr><td><strong>%s</strong></td><td><input type="password" autocomplete="new-password" name="key[%s]" class="regular-text" placeholder="%s"></td><td>%s</td><td><input type="checkbox" name="clear[%s]" value="1"></td></tr>',
-                esc_html( $label ), esc_attr( $slug ), $has ? esc_attr( 'saved ••••' . substr( $lic[ $slug ]['key'], -4 ) ) : 'not set',
-                $slug === 'learndash' ? '<input type="email" name="email[learndash]" value="' . esc_attr( $lic[ $slug ]['email'] ?? '' ) . '" placeholder="Needed for LearnDash">' : ( $slug === 'elementor-pro' ? '<span style="color:#646970">No key needed (leave empty). Elementor Pro only activates with Elementor → License → Connect &amp; Activate on each site; DFY License Manager then takes it over and removes it after the year automatically.</span>' : '<span style="color:#646970">not needed</span>' ),
+            $rcp = $slug === 'restrict-content-pro';
+            printf( '<tr><td><strong>%s</strong>%s</td><td><input type="password" autocomplete="new-password" name="key[%s]" class="regular-text" placeholder="%s">%s</td><td>%s</td><td><input type="checkbox" name="clear[%s]" value="1"></td></tr>',
+                esc_html( $label ), $rcp ? '<span class="dfy-sub">SolidWP login, not a key</span>' : '', esc_attr( $slug ),
+                $has ? ( $rcp ? 'SolidWP password saved' : esc_attr( 'saved ••••' . substr( $lic[ $slug ]['key'], -4 ) ) ) : ( $rcp ? 'SolidWP password' : 'not set' ),
+                $rcp ? '<p class="description">Stays on this hub. Each site only receives a sign-in token that works for that site, and its license is released after the year. Needs Restrict Content Pro 3.5 or later on the site.</p>' : '',
+                $rcp ? '<input type="text" autocomplete="off" name="email[restrict-content-pro]" value="' . esc_attr( $lic[ $slug ]['email'] ?? '' ) . '" placeholder="SolidWP username">' : ( $slug === 'learndash' ? '<input type="email" name="email[learndash]" value="' . esc_attr( $lic[ $slug ]['email'] ?? '' ) . '" placeholder="Needed for LearnDash">' : ( $slug === 'elementor-pro' ? '<span style="color:#646970">No key needed (leave empty). Elementor Pro only activates with Elementor → License → Connect &amp; Activate on each site; DFY License Manager then takes it over and removes it after the year automatically.</span>' : '<span style="color:#646970">not needed</span>' ) ),
                 esc_attr( $slug ) );
         }
         echo '</tbody></table>';
         submit_button( 'Save licenses' );
-        echo '</form>';
+        echo '</form></div>';
     }
 
     private static function screen_settings(): void {
         $s = DFY_LH_Store::settings();
+        echo '<div class="dfy-card"><h2>General</h2><p class="dfy-card__desc">License period, reminders, notifications and removal rules.</p>';
         self::form_open( 'dfy_lh_save_settings' );
         $f = function ( $name, $label, $html, $desc = '' ) {
             echo '<tr><th>' . esc_html( $label ) . '</th><td>' . $html . ( $desc ? '<p class="description">' . esc_html( $desc ) . '</p>' : '' ) . '</td></tr>';
@@ -682,26 +786,28 @@ class DFY_LH_Admin {
         $f( 'test_mode', 'Test mode', '<label><input type="checkbox" name="test_mode" value="1" ' . checked( $s['test_mode'], 1, false ) . '> Only log what would be removed</label>', 'Customers deactivating or deleting DFY License Manager still remove licenses, and "Deactivate licenses" still works.' );
         echo '</table>';
         submit_button( 'Save settings' );
-        echo '</form>';
+        echo '</form></div><div class="dfy-grid-2">';
 
         // Encryption key status.
-        echo '<hr><h2>Encryption</h2>';
+        echo '<div class="dfy-card"><h2>Encryption</h2>';
         echo DFY_Crypto::has_own_key()
-            ? '<p><span style="color:#008a20;font-weight:600">✓ Permanent key set</span> (DFY_LICENSE_ENC_KEY in wp-config.php). Stored keys no longer depend on the WordPress salts.</p>'
-            : '<p><span style="color:#d63638;font-weight:600">✗ No permanent key.</span> License keys and site secrets are encrypted with this site\'s WordPress salts; if the salts change, they can no longer be read. Add this line to wp-config.php (above "That\'s all, stop editing"), with your own long random value:</p><p><code>define( \'DFY_LICENSE_ENC_KEY\', \'…64 random characters…\' );</code></p><p class="description">Existing data is re-encrypted with the new key automatically on the next page load. Keep a copy of the key; never change or remove it afterwards.</p>';
+            ? '<p><span class="dfy-tag dfy-tag--ok">✓ Permanent key set</span> (DFY_LICENSE_ENC_KEY in wp-config.php). Stored keys no longer depend on the WordPress salts.</p>'
+            : '<p><span class="dfy-tag dfy-tag--warn">✗ No permanent key</span> License keys and site secrets are encrypted with this site\'s WordPress salts; if the salts change, they can no longer be read. Add this line to wp-config.php (above "That\'s all, stop editing"), with your own long random value:</p><p><code>define( \'DFY_LICENSE_ENC_KEY\', \'…64 random characters…\' );</code></p><p class="description">Existing data is re-encrypted with the new key automatically on the next page load. Keep a copy of the key; never change or remove it afterwards.</p>';
+        echo '</div>';
 
         // WP-Cron health.
         $next = wp_next_scheduled( 'dfy_lh_daily' );
         $last = (int) get_option( 'dfy_lh_last_run' );
         $test = (array) get_option( 'dfy_lh_cron_test', [] );
-        echo '<hr><h2>Scheduled tasks (WP-Cron)</h2><table class="widefat striped" style="max-width:760px"><tbody>';
+        echo '<div class="dfy-card"><h2>Scheduled tasks (WP-Cron)</h2><p class="dfy-card__desc">The daily check sends reminders and removes ended licenses.</p><table class="widefat"><tbody>';
         echo '<tr><th style="width:220px">Daily license check</th><td>' . ( $next ? 'next run ' . esc_html( wp_date( 'M j, Y H:i', $next ) ) . ( $next < time() - HOUR_IN_SECONDS ? ' <strong style="color:#d63638">(overdue — WP-Cron is not running)</strong>' : '' ) : '<strong style="color:#d63638">not scheduled</strong>' ) . '</td></tr>';
         echo '<tr><th>Last daily check</th><td>' . ( $last ? esc_html( wp_date( 'M j, Y H:i', $last ) ) . ( time() - $last > 2 * DAY_IN_SECONDS ? ' <strong style="color:#d63638">(more than 2 days ago)</strong>' : '' ) : 'never' ) . '</td></tr>';
         echo '<tr><th>WP-Cron</th><td>' . ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ? 'DISABLE_WP_CRON is set — a server cron job must call wp-cron.php' : 'runs when someone visits the site (a server cron job is more reliable)' ) . '</td></tr>';
-        echo '<tr><th>Last WP-Cron test</th><td>' . ( ! empty( $test['ran'] ) ? 'queued ' . esc_html( wp_date( 'M j, H:i:s', (int) $test['queued'] ) ) . ', ran ' . esc_html( wp_date( 'M j, H:i:s', (int) $test['ran'] ) ) . ' — email to ' . esc_html( $test['to'] ) . ' ' . ( ! empty( $test['mail'] ) ? '<span style="color:#008a20">sent</span>' : '<strong style="color:#d63638">wp_mail failed (check SMTP)</strong>' ) : 'not run yet' ) . '</td></tr>';
+        echo '<tr><th>Last WP-Cron test</th><td>' . ( ! empty( $test['ran'] ) ? 'queued ' . esc_html( wp_date( 'M j, H:i:s', (int) $test['queued'] ) ) . ', ran ' . esc_html( wp_date( 'M j, H:i:s', (int) $test['ran'] ) ) . ' — email to ' . esc_html( $test['to'] ) . ' ' . ( ! empty( $test['mail'] ) ? '<span class="dfy-status-ok">sent</span>' : '<span class="dfy-status-bad">wp_mail failed (check SMTP)</span>' ) : 'not run yet' ) . '</td></tr>';
         echo '</tbody></table>';
         self::form_open( 'dfy_lh_cron_test' );
-        echo '<p><input type="email" name="to" class="regular-text" required value="' . esc_attr( $s['customer_test_to'] ?: $s['notify_email'] ) . '"> <button class="button">Send test email through WP-Cron</button></p><p class="description">Queues the email as a WP-Cron task. If it arrives (and "ran" appears above within a minute or two), WP-Cron and email both work.</p></form>';
+        echo '<p><input type="email" name="to" class="regular-text" required value="' . esc_attr( $s['customer_test_to'] ?: $s['notify_email'] ) . '"> <button class="button">Send test email through WP-Cron</button></p><p class="description">Queues the email as a WP-Cron task. If it arrives (and "ran" appears above within a minute or two), WP-Cron and email both work.</p></form></div></div>';
+        self::import_card();
     }
 
     public static function cron_test(): void {

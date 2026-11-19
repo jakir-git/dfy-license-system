@@ -159,7 +159,7 @@ class DFY_LM_Client {
             }
             $r = DFY_LM_Vendors::activate( $slug, $lic );
             $c['plugins'][ $slug ] = [ 'state' => $r['ok'] ? 'active' : 'activate_failed', 'msg' => $r['msg'] ];
-            if ( $r['ok'] ) { $c['ours'][ $slug ] = DFY_LM_Vendors::fingerprint( $slug, (string) $lic['key'] ); $c['ended'] = []; }
+            if ( $r['ok'] ) { $c['ours'][ $slug ] = $slug === 'restrict-content-pro' ? DFY_LM_Vendors::current_fingerprint( $slug ) : DFY_LM_Vendors::fingerprint( $slug, (string) $lic['key'] ); $c['ended'] = []; }
             $lines[] = DFY_License_Remote::label( $slug ) . ': ' . $r['msg'];
         }
         self::put( $c );
@@ -172,7 +172,7 @@ class DFY_LM_Client {
         $c['ended']            = [];
         if ( $slug === 'elementor-pro' ) $c['el_accounts'] = DFY_LM_Vendors::el_accounts(); // the DFY Elementor account used for "Connect & Activate"
         $c['plugins'][ $slug ] = [ 'state' => 'active', 'msg' => 'Was already licensed on this site; now managed by DFY License Manager.' ];
-        if ( $slug !== 'gravityforms' ) $c['send_keys'][ $slug ] = 1; // Gravity Forms is removed with its site key, not the license key
+        if ( ! in_array( $slug, [ 'gravityforms', 'restrict-content-pro' ], true ) ) $c['send_keys'][ $slug ] = 1; // Gravity Forms is removed with its site key, RCP with the SolidWP login
     }
 
     /** Take over every DFY plugin license already active here that we do not track yet. @return string[] slugs */

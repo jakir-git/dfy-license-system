@@ -1,7 +1,8 @@
 <?php
 // Minimal WordPress stand-ins: options, wpdb, HTTP router (hub REST, Asana, vendors).
 error_reporting( E_ALL );
-define( 'ABSPATH', __DIR__ . '/' );
+define( 'ABSPATH', __DIR__ . '/' ); define( 'WPINC', 'wp-includes' );
+function network_home_url( $p = '', $s = null ) { $h = $GLOBALS['home']; return $s === 'http' ? preg_replace( '/^https/', 'http', $h ) : $h; }
 define( 'ARRAY_A', 'ARRAY_A' );
 define( 'DAY_IN_SECONDS', 86400 ); define( 'HOUR_IN_SECONDS', 3600 ); define( 'MINUTE_IN_SECONDS', 60 );
 define( 'AUTH_KEY', 'test-auth' ); define( 'SECURE_AUTH_SALT', 'test-salt' );
@@ -139,6 +140,7 @@ function wp_remote_request( $url, $a = [] ) {
     }
     // Vendors: record and answer.
     $GLOBALS['calls'][] = [ 'm' => $m, 'url' => $url, 'headers' => $a['headers'] ?? [], 'body' => $a['body'] ?? null ];
+    if ( strpos( $url, 'https://api.ithemes.com/updater/' ) === 0 ) return solid_answer( $url, $a );
     $is_deact = strpos( $url, 'deactivat' ) !== false || $m === 'DELETE' || $m === 'PUT';
     if ( strpos( $url, 'gravityapi.com' ) !== false || strpos( $url, 'learndash.com' ) !== false ) return resp( 200, [ 'ok' => true ] );
     return resp( 200, [ 'success' => true, 'license' => $is_deact ? 'deactivated' : 'valid', 'expires' => '2027-12-31 23:59:59' ] );
@@ -150,3 +152,15 @@ function reset_client( $home = 'https://client.example.com' ) {
     $GLOBALS['home'] = $home; $GLOBALS['calls'] = []; $GLOBALS['plugin_ops'] = []; $GLOBALS['transients'] = [];
 }
 function wp_remote_retrieve_header( $r, $h ) { return ''; }
+
+/** SolidWP updater API: checks the auth token the way the server does (phpass of pbkdf2(password).user.site.wp). */
+function solid_answer( $url, $a ) {
+    parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $q );
+    $req = json_decode( $a['body']['request'], true );
+    require_once ABSPATH . WPINC . '/class-phpass.php';
+    $pw  = hash_pbkdf2( 'sha256', $GLOBALS['solid_pass'], strtolower( $q['user'] ) . 'wdHVwU&HcYcWnllo%kTUUnxpScy4%ICM29', 131072, 64 );
+    $ok  = $q['user'] === $GLOBALS['solid_user'] && ( new PasswordHash( 8, true ) )->CheckPassword( substr( $pw . $q['user'] . $q['site'] . $q['wp'], 0, 512 ), $req['auth_token'] );
+    if ( ! $ok ) return resp( 200, [ 'error' => [ 'type' => 'auth', 'message' => 'Invalid username or password', 'code' => 'auth' ] ] );
+    $pkg = array_key_first( $req['packages'] );
+    return resp( 200, [ 'packages' => [ $pkg => strpos( $url, 'package-activate' ) !== false ? [ 'key' => 'SOLID-PKG-KEY-77', 'status' => 'active' ] : [ 'status' => 'inactive' ] ] ] );
+}

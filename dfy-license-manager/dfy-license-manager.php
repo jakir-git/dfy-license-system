@@ -2,7 +2,7 @@
 /**
  * Plugin Name: DFY License Manager
  * Description: Activates the premium plugin licenses included with your BuddyBoss Done-For-You project for one year. Deactivating or deleting this plugin removes those licenses.
- * Version:     1.10.0
+ * Version:     1.11.1
  * Author:      BuddyBoss DFY
  * Requires PHP: 7.4
  * Requires at least: 6.0
@@ -10,7 +10,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'DFY_LM_VERSION', '1.10.0' );
+define( 'DFY_LM_VERSION', '1.11.1' );
 define( 'DFY_LM_FILE', __FILE__ );
 
 require_once __DIR__ . '/includes/class-dfy-crypto.php';

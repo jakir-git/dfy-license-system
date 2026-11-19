@@ -59,22 +59,26 @@ DFY_LH_Store::update( $id, [ 'command' => 'remove' ] ); DFY_LM_Client::heartbeat
 $_GET = [ 'page' => 'x' ]; ob_start(); DFY_LM_Admin::expiry_notice(); $note = ob_get_clean();
 $_GET = []; ob_start(); DFY_LM_Admin::render(); $page = ob_get_clean();
 DFY_LH_Admin::import_lines( "Alpha Club | 2025-07-03 | https://app.pipefy.com/open-cards/1 | |" );
-$ref = $list( [ 'status' => 'reference' ] ); $add = $list( [ 'tab' => 'add' ] );
+$ref = $list( [ 'status' => 'reference' ] ); $add = $list( [ 'tab' => 'add' ] ); $setp = $list( [ 'tab' => 'settings' ] ); $home = $list( [] );
 $checks += [
   'client ended notice' => strpos( $note, 'have ended' ) !== false && strpos( $note, 'contact BuddyBoss DFY' ) !== false && strpos( $note, 'https://dfy.example.com/contact' ) !== false,
   'client page shows Deactivated' => strpos( $page, 'Deactivated' ) !== false && strpos( $page, 'stays installed' ) !== false,
   'vendor link in notice' => strpos( $note, 'learndash.com' ) !== false,
   'hub: Activate licenses button' => strpos( $list( [] ), 'Activate licenses' ) !== false,
-  'reference row' => strpos( $ref, 'Reference only' ) !== false && strpos( $ref, 'Pipefy ↗' ) !== false && strpos( $ref, 'Alpha Club' ) !== false && strpos( $ref, '>A</strong>' ) === false,
-  'import form on Add site' => strpos( $add, 'Add completed sites for reference' ) !== false,
+  'reference row' => strpos( $ref, 'Reference only' ) === false && strpos( $ref, 'no DFY License Manager' ) !== false && strpos( $ref, '>Expired<' ) !== false && strpos( $ref, 'Pipefy ↗' ) !== false && strpos( $ref, 'Alpha Club' ) !== false && strpos( $ref, '>A</strong>' ) === false,
+  'import form on Settings' => strpos( $setp, 'Add completed sites for reference' ) !== false && strpos( $add, 'Add completed sites for reference' ) === false,
+  'add popup on every screen' => strpos( $home, '<dialog class="dfy-modal" id="dfy-add-site"' ) !== false && strpos( $home, 'data-dfy-open="add"' ) !== false,
+  'add form: Asana right after URL' => strpos( $add, 'name="asana"' ) > strpos( $add, 'name="site_url"' ) && strpos( $add, 'name="asana"' ) < strpos( $add, 'name="label"' ),
+  'no Add site tab' => strpos( $home, '>Add site</a>' ) === false,
+  'expires soon pill' => strpos( $home, '>Expires soon<' ) !== false,
 ];
 $f = DFY_LH_Store::get( $id )['flags']; $f['evidence'] = [ [ 'slug' => 'site', 'label' => 'Site', 'date' => '2019-05-01 00:00:00', 'source' => 'First user account on the site (site created)' ], [ 'slug' => 'elementor-pro', 'label' => 'Elementor Pro', 'date' => '2026-02-03 10:00:00', 'source' => 'Elementor first installed (Elementor install history)' ] ];
 DFY_LH_Store::update( $id, [ 'flags' => $f ] );
 $sp = $list( [ 'site' => $id ] );
 $checks += [
   'evidence table' => strpos( $sp, 'Dates found on the site' ) !== false && strpos( $sp, 'suggested start' ) !== false,
-  'suggestion skips site creation' => strpos( $sp, 'Elementor first installed (Elementor install history) <span style="color:#008a20">← suggested start' ) !== false,
-  'older project checkbox' => strpos( $add, 'name="older"' ) !== false,
+  'suggestion skips site creation' => strpos( $sp, 'Elementor first installed (Elementor install history) <span class="dfy-tag dfy-tag--ok">← suggested start' ) !== false,
+  'older project checkbox removed' => strpos( $add, 'name="older"' ) === false,
 ];
 $f = DFY_LH_Store::get( $id )['flags']; $f['client'] = 'Charlie Example'; $f['email'] = 'charlie@example.com'; DFY_LH_Store::update( $id, [ 'flags' => $f ] );
 $lst = $list( [] );
@@ -88,6 +92,7 @@ $set = $list( [ 'tab' => 'settings' ] );
 $checks += [
   'settings: encryption status' => strpos( $set, 'No permanent key' ) !== false,
   'settings: cron test button' => strpos( $set, 'Send test email through WP-Cron' ) !== false && strpos( $set, 'Daily license check' ) !== false,
+  'licenses: no Uncanny field' => strpos( $list( [ 'tab' => 'licenses' ] ), 'key[uncanny-automator-pro]' ) === false,
   'settings: customer email mode' => strpos( $set, 'name="customer_mail"' ) !== false && strpos( $set, 'name="customer_test_to"' ) !== false,
 ];
 foreach ( $checks as $k => $v ) echo ( $v ? 'ok   ' : 'FAIL ' ) . "list: $k\n";

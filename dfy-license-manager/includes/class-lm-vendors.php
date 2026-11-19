@@ -24,6 +24,7 @@ class DFY_LM_Vendors {
             case 'uncanny-automator-pro': return defined( 'AUTOMATOR_PRO_ITEM_ID' ) && defined( 'AUTOMATOR_PRO_LICENSING_URL' );
             case 'automatorwp-pro':       return isset( $GLOBALS['cmb2_field_edd_license'] ) && self::awp_field( true ) !== null;
             case 'wp-all-import-pro':     return class_exists( 'PMXI_Plugin' ) && method_exists( 'PMXI_Plugin', 'getInstance' );
+            case 'restrict-content-pro':  return defined( 'RCP_PLUGIN_VERSION' ) && ( class_exists( 'RCP_Member' ) || function_exists( 'rcp_get_customer' ) ) && ! self::rcp_free_only();
         }
         return false;
     }
@@ -45,6 +46,11 @@ class DFY_LM_Vendors {
             'awp_server'        => (string) ( self::awp_field()['server'] ?? '' ),
             'awp_item_id'       => (string) ( self::awp_field()['item_id'] ?? '' ),
             'awp_item_name'     => (string) ( self::awp_field()['item_name'] ?? '' ),
+            'rcp_version'       => defined( 'RCP_PLUGIN_VERSION' ) ? (string) RCP_PLUGIN_VERSION : '',
+            'solid_package'     => self::solid_package(),
+            'solid_site'        => self::solid_package() !== '' ? self::solid_site() : '',
+            'solid_key'         => self::solid_package() !== '' ? self::stored_key( 'restrict-content-pro' ) : '',
+            'wp_version'        => (string) ( $GLOBALS['wp_version'] ?? '' ),
         ] );
     }
 
@@ -63,6 +69,7 @@ class DFY_LM_Vendors {
             case 'uncanny-automator-pro': return trim( (string) get_option( 'uap_automator_pro_license_key', '' ) );
             case 'automatorwp-pro':       $f = self::awp_field(); $o = (array) get_option( 'automatorwp_settings', [] ); return $f ? trim( (string) ( $o[ $f['id'] ] ?? '' ) ) : '';
             case 'wp-all-import-pro':     return self::wpai_key();
+            case 'restrict-content-pro':  $p = self::solid_package(); $k = (array) get_site_option( 'ithemes-updater-keys', [] ); return $p !== '' ? trim( (string) ( $k[ $p ] ?? '' ) ) : '';
         }
         return '';
     }
@@ -98,6 +105,7 @@ class DFY_LM_Vendors {
             case 'uncanny-automator-pro': return get_option( 'uap_automator_pro_license_status', '' ) === 'valid';
             case 'automatorwp-pro':       return function_exists( 'rgc_cmb2_edd_license_status' ) ? rgc_cmb2_edd_license_status( self::stored_key( 'automatorwp-pro' ) ) === 'valid' : null;
             case 'wp-all-import-pro':     $o = (array) get_option( 'PMXI_Plugin_Options', [] ); return ( $o['statuses']['PMXI_Plugin'] ?? '' ) === 'valid';
+            case 'restrict-content-pro':  return self::solid_package() === '' ? false : self::stored_key( 'restrict-content-pro' ) !== '';
         }
         return null;
     }
@@ -149,6 +157,7 @@ class DFY_LM_Vendors {
                 case 'uncanny-automator-pro': return self::ua_call( 'activate-license', $key );
                 case 'automatorwp-pro':       return self::awp_activate( $key );
                 case 'wp-all-import-pro':     return self::wpai_activate( $key );
+                case 'restrict-content-pro':  return self::solid_call( 'package-activate', (string) ( $lic['email'] ?? '' ), $key );
             }
         } catch ( \Throwable $e ) {
             return self::r( false, 'Error: ' . $e->getMessage() );
@@ -280,6 +289,10 @@ class DFY_LM_Vendors {
                         return self::offline( 'automatorwp-pro' );
                     case 'wp-all-import-pro':
                         return self::offline( 'wp-all-import-pro' );
+                    case 'restrict-content-pro':
+                        $s = (array) get_option( 'dfy_lm_solid', [] );
+                        $r = self::solid_call( 'package-deactivate', (string) ( $s['user'] ?? '' ), (string) ( $s['token'] ?? '' ) );
+                        return $r['ok'] ? $r : self::offline( 'restrict-content-pro', $r['msg'] . ' ' );
                 }
             }
             // Vendor plugin is not running: call the vendor directly with what it stored.
@@ -291,6 +304,7 @@ class DFY_LM_Vendors {
 
     private static function offline( string $slug, string $prefix = '' ): array {
         $lic = [ 'key' => self::stored_key( $slug ), 'email' => (string) get_site_option( 'nss_plugin_license_email_sfwd_lms', '' ) ];
+        if ( $slug === 'restrict-content-pro' ) { $s = (array) get_option( 'dfy_lm_solid', [] ); $lic = [ 'key' => '', 'email' => (string) ( $s['user'] ?? '' ), 'token' => (string) ( $s['token'] ?? '' ) ]; }
         $r   = DFY_License_Remote::remove( $slug, $lic, self::urls(), self::meta() );
         if ( $r['ok'] ) {
             if ( $slug === 'elementor-pro' ) self::el_forget();
@@ -300,6 +314,7 @@ class DFY_LM_Vendors {
             if ( $slug === 'uncanny-automator-pro' ) { update_option( 'uap_automator_pro_license_key', '' ); update_option( 'uap_automator_pro_license_status', '' ); }
             if ( $slug === 'automatorwp-pro' ) self::awp_forget( $lic['key'] );
             if ( $slug === 'wp-all-import-pro' ) self::wpai_save( '', 'deactivated' );
+            if ( $slug === 'restrict-content-pro' ) self::solid_forget();
         }
         $r['msg'] = $prefix . $r['msg'];
         return $r;
@@ -362,6 +377,78 @@ class DFY_LM_Vendors {
         $k = substr( md5( $key ), 0, 10 );
         delete_transient( "cmb2_edd_license_data_$k" );
         delete_transient( "cmb2_edd_license_try_$k" );
+    }
+
+    /* ── Restrict Content Pro (SolidWP licensing) ──────────────── */
+    // RCP 3.5.x licenses through the bundled SolidWP/iThemes updater (lib/updater): the SolidWP
+    // username + password make a site-bound auth token, and the license key it returns is kept in the
+    // site option ithemes-updater-keys[package]. The hub makes the token (the password stays on the hub).
+    // RCP 3.3.12 and older use restrictcontentpro.com licensing, which no longer exists.
+
+    /** The free Restrict Content plugin defines the same constants; only the Pro plugin is licensed. */
+    private static function rcp_free_only(): bool {
+        return function_exists( 'restrict_content_pro' ) && is_object( restrict_content_pro() ) && method_exists( restrict_content_pro(), 'is_pro' ) && ! restrict_content_pro()->is_pro();
+    }
+
+    /** RCP's package slug in the SolidWP updater ('' when RCP is too old or the updater is not loaded). */
+    public static function solid_package(): string {
+        $pkg = '';
+        $path = (string) ( $GLOBALS['ithemes_updater_path'] ?? '' );
+        if ( $path !== '' && file_exists( $path . '/packages.php' ) ) {
+            try {
+                require_once $path . '/packages.php';
+                if ( class_exists( 'Ithemes_Updater_Packages' ) ) {
+                    foreach ( (array) Ithemes_Updater_Packages::get_local_details() as $file => $d ) {
+                        if ( ( $d['type'] ?? '' ) === 'plugins' && ( strpos( (string) $file, 'restrict-content-pro' ) === 0 || strpos( (string) ( $d['package'] ?? '' ), 'restrict-content-pro' ) === 0 ) ) { $pkg = (string) $d['package']; break; }
+                    }
+                }
+            } catch ( \Throwable $e ) { $pkg = ''; }
+        }
+        if ( $pkg !== '' ) { if ( get_option( 'dfy_lm_solid_pkg' ) !== $pkg ) update_option( 'dfy_lm_solid_pkg', $pkg, false ); }
+        elseif ( ! self::loaded( 'restrict-content-pro' ) ) $pkg = (string) get_option( 'dfy_lm_solid_pkg', '' ); // RCP deactivated: still remove our key
+        return $pkg;
+    }
+
+    /** Site URL as the SolidWP updater sends it (its licensed site URL setting, else the network home URL). */
+    private static function solid_site(): string {
+        $url = '';
+        $s   = $GLOBALS['ithemes-updater-settings'] ?? null;
+        if ( is_object( $s ) && is_callable( [ $s, 'get_licensed_site_url' ] ) ) $url = (string) $s->get_licensed_site_url();
+        if ( $url === '' ) $url = network_home_url( '', 'http' );
+        return DFY_License_Remote::solid_site( $url );
+    }
+
+    /** package-activate / package-deactivate through the updater's own request code, with the hub-made token. */
+    private static function solid_call( string $action, string $user, string $token ): array {
+        $pkg  = self::solid_package();
+        $path = (string) ( $GLOBALS['ithemes_updater_path'] ?? '' );
+        if ( $pkg === '' || $path === '' ) {
+            return self::r( false, 'Restrict Content Pro ' . ( defined( 'RCP_PLUGIN_VERSION' ) ? RCP_PLUGIN_VERSION . ' ' : '' ) . 'has no SolidWP licensing. Update Restrict Content Pro to 3.5 or later (the old restrictcontentpro.com licensing no longer exists).' );
+        }
+        if ( $user === '' || $token === '' ) return self::r( false, 'No SolidWP login received from the hub.' );
+        require_once $path . '/server.php';
+        require_once $path . '/updates.php';
+        $pk  = [ $pkg => [ 'ver' => defined( 'RCP_PLUGIN_VERSION' ) ? (string) RCP_PLUGIN_VERSION : '', 'key' => self::stored_key( 'restrict-content-pro' ), 'active' => 1 ] ];
+        $res = \Ithemes_Updater_Server::request( $action, [ 'user' => $user ], [ 'auth_token' => $token, 'packages' => $pk ] );
+        $r   = DFY_License_Remote::solid_result( $action, $pkg, $res );
+        if ( ! is_wp_error( $res ) && is_array( $res ) ) {
+            try { \Ithemes_Updater_Updates::process_server_response( $res ); } catch ( \Throwable $e ) { /* key saved below */ }
+        }
+        if ( $action === 'package-activate' && $r['ok'] ) {
+            $k = (array) get_site_option( 'ithemes-updater-keys', [] );
+            if ( ( $k[ $pkg ] ?? '' ) === '' ) { $k[ $pkg ] = (string) $r['key']; update_site_option( 'ithemes-updater-keys', $k ); }
+            update_option( 'dfy_lm_solid', [ 'user' => $user, 'token' => $token ], false ); // site-bound token, needed to release the license later
+            unset( $r['key'] );
+        }
+        if ( $action === 'package-deactivate' && $r['ok'] ) self::solid_forget();
+        return $r;
+    }
+
+    private static function solid_forget(): void {
+        $pkg = self::solid_package();
+        $k   = (array) get_site_option( 'ithemes-updater-keys', [] );
+        if ( $pkg !== '' && isset( $k[ $pkg ] ) ) { $k[ $pkg ] = ''; update_site_option( 'ithemes-updater-keys', $k ); }
+        delete_option( 'dfy_lm_solid' );
     }
 
     /* ── WP All Import Pro ──────────────────────────────────── */

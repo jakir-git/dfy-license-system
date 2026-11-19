@@ -134,7 +134,7 @@ class DFY_LH_Store {
         $all = (array) get_option( 'dfy_lh_licenses', [] );
         $row = $all[ $slug ] ?? [ 'key' => '', 'email' => '' ];
         if ( $key !== null ) $row['key'] = DFY_Crypto::encrypt( trim( $key ) );
-        $row['email'] = sanitize_email( $email );
+        $row['email'] = $slug === 'restrict-content-pro' ? sanitize_text_field( $email ) : sanitize_email( $email ); // SolidWP username
         $all[ $slug ] = $row;
         update_option( 'dfy_lh_licenses', $all, false );
     }
